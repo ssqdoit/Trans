@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
+  <key>CFBundleExecutable</key><string>Trans</string>
+  <key>CFBundleIdentifier</key><string>com.trans.mac</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>Trans</string>
+  <key>CFBundleDisplayName</key><string>Trans</string>
+  <key>CFBundleIconFile</key><string>Trans.icns</string>
+  <key>CFBundleGetInfoString</key><string>随处取词，看图识字，多引擎翻译。</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.0.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>Trans URL</string>
+      <key>CFBundleURLSchemes</key><array><string>trans</string></array>
+    </dict>
+  </array>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSUIElement</key><false/>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSHumanReadableCopyright</key><string>Independent community implementation</string>
+</dict>
+</plist>

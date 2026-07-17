@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="tileShadow" x="18" y="24" width="988" height="992" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#312B25" flood-opacity="0.08"/>
+    </filter>
+    <clipPath id="waterClip">
+      <path d="M350 374H674L646 685C643 712 628 726 600 726H424C396 726 381 712 378 685L350 374Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Warm, quiet tile inspired by the supplied monochrome icon references. -->
+  <g filter="url(#tileShadow)">
+    <rect x="64" y="64" width="896" height="896" rx="214" fill="#FCFBF7"/>
+    <rect x="74" y="74" width="876" height="876" rx="204" stroke="#E5E1DA" stroke-width="20"/>
+  </g>
+
+  <circle cx="512" cy="512" r="326" fill="#171717"/>
+
+  <!-- Calm water, clipped inside the glass. -->
+  <g clip-path="url(#waterClip)">
+    <path d="M326 520C391 488 449 547 512 516C575 485 633 540 698 508V780H326V520Z" fill="#8DD9ED"/>
+    <path d="M326 520C391 488 449 547 512 516C575 485 633 540 698 508" stroke="#DDF8FF" stroke-width="18" stroke-linecap="round"/>
+  </g>
+
+  <!-- One bold glass outline remains legible in the Dock. -->
+  <path d="M330 350H694L661 692C657 734 634 756 592 756H432C390 756 367 734 363 692L330 350Z" stroke="#FFFFFF" stroke-width="46" stroke-linejoin="round"/>
+  <path d="M320 350H704" stroke="#FFFFFF" stroke-width="46" stroke-linecap="round"/>
+
+  <!-- A single soft highlight suggests a clean glass without adding detail. -->
+  <path d="M405 414L417 470" stroke="#FFFFFF" stroke-opacity="0.72" stroke-width="24" stroke-linecap="round"/>
+</svg>
