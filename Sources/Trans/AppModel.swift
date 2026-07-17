@@ -142,7 +142,7 @@ final class AppModel: ObservableObject {
         await restoreFocusToPreviousApp()
         do {
             let text = try await captureService.selectedText()
-            await presentSelectionPopup(text: text, at: NSEvent.mouseLocation, force: true)
+            await presentPopup(text: text, at: NSEvent.mouseLocation, force: true)
         } catch {
             selectionPopup.showMessage(error.localizedDescription, at: NSEvent.mouseLocation)
         }
@@ -191,8 +191,13 @@ final class AppModel: ObservableObject {
     func screenshotAndRecognize(silent: Bool = false) async {
         do {
             let image = try await captureService.interactiveScreenshot()
-            await recognize(image: image, mode: silent ? "静默截图 OCR" : "截图 OCR")
-            if !silent { selectedSection = .ocr; activate() }
+            if silent, OCRPresentationPolicy.shouldShowPopup(trigger: .silentScreenshot, isAppActive: NSApp.isActive) {
+                await recognize(image: image, mode: "静默截图 OCR", shouldTranslate: false)
+                await presentOCRPopup(historyMode: "静默截图 OCR")
+            } else {
+                await recognize(image: image, mode: silent ? "静默截图 OCR" : "截图 OCR")
+                if !silent { selectedSection = .ocr; activate() }
+            }
         } catch { show(error.localizedDescription) }
     }
 
@@ -207,7 +212,9 @@ final class AppModel: ObservableObject {
 
     func recognizeClipboard() async {
         guard let image = captureService.imageFromPasteboard() else { show("剪贴板中没有图片"); return }
-        await recognize(image: image, mode: "剪贴板 OCR")
+        let popup = OCRPresentationPolicy.shouldShowPopup(trigger: .clipboard, isAppActive: NSApp.isActive)
+        await recognize(image: image, mode: "剪贴板 OCR", shouldTranslate: popup ? false : nil)
+        if popup { await presentOCRPopup(historyMode: "剪贴板 OCR") }
     }
 
     func recognize(image: NSImage, mode: String, shouldTranslate: Bool? = nil, append: Bool = false) async {
@@ -254,7 +261,9 @@ final class AppModel: ObservableObject {
                       NSPasteboard.general.changeCount != self.lastClipboardChange,
                       let image = self.captureService.imageFromPasteboard() else { return }
                 self.lastClipboardChange = NSPasteboard.general.changeCount
-                await self.recognize(image: image, mode: "连续 OCR")
+                let popup = OCRPresentationPolicy.shouldShowPopup(trigger: .continuous, isAppActive: NSApp.isActive)
+                await self.recognize(image: image, mode: "连续 OCR", shouldTranslate: popup ? false : nil)
+                if popup { await self.presentOCRPopup(historyMode: "连续 OCR") }
             }
         }
     }
@@ -431,9 +440,22 @@ final class AppModel: ObservableObject {
             selectedSection = .translate
             activate()
         }
+        selectionPopup.onRetranslate = { [weak self] _ in
+            guard let self else { return }
+            Task { await self.retranslatePopup() }
+        }
+        selectionPopup.onLanguagesChanged = { [weak self] source, target in
+            // show() copies the global languages into the popup and the swap
+            // button fires two onChange callbacks with the same final pair;
+            // both cases arrive here equal to the globals and are ignored.
+            guard let self, source != self.sourceLanguage || target != self.targetLanguage else { return }
+            self.sourceLanguage = source
+            self.targetLanguage = target
+            Task { await self.retranslatePopup() }
+        }
         selectionWatcher.onSelection = { [weak self] text, location in
             guard let self else { return }
-            Task { await self.presentSelectionPopup(text: text, at: location) }
+            Task { await self.presentPopup(text: text, at: location) }
         }
         if settings.selectionPopupEnabled { selectionWatcher.start() }
     }
@@ -449,15 +471,21 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func presentSelectionPopup(text: String, at location: CGPoint, force: Bool = false) async {
+    private func presentPopup(
+        text: String,
+        title: String = "划词翻译",
+        historyMode: String = "划词翻译",
+        at location: CGPoint,
+        force: Bool = false
+    ) async {
         guard force || SelectionPresentationPolicy.shouldPresent(
             text: text,
             lastShownText: selectionPopup.lastShownText,
             isPopupVisible: selectionPopup.isVisible
         ) else { return }
-        selectionPopup.show(text: text, source: sourceLanguage, target: targetLanguage, at: location)
+        selectionPopup.show(text: text, title: title, source: sourceLanguage, target: targetLanguage, at: location)
         let results = await translateOutputs(for: text)
-        // A newer selection may have replaced this popup while we were translating.
+        // A newer selection or an in-popup edit may have replaced this text.
         guard selectionPopup.state.sourceText == text else { return }
         if results.isEmpty {
             selectionPopup.fail(message: TransError.noEnabledService.localizedDescription)
@@ -469,8 +497,37 @@ final class AppModel: ObservableObject {
             sourceLanguage: sourceLanguage,
             targetLanguage: targetLanguage,
             outputs: results,
-            mode: "划词翻译"
+            mode: historyMode
         ))
+    }
+
+    /// Retranslates the popup's current text after an in-popup edit or
+    /// language change. Does not append history to avoid flooding it while
+    /// the user is still typing.
+    private func retranslatePopup() async {
+        let text = selectionPopup.state.sourceText
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        selectionPopup.beginTranslating()
+        let source = sourceLanguage
+        let target = targetLanguage
+        let results = await translateOutputs(for: text)
+        // Drop stale results if the text or languages changed mid-flight.
+        guard selectionPopup.state.sourceText == text,
+              sourceLanguage == source, targetLanguage == target else { return }
+        if results.isEmpty {
+            selectionPopup.fail(message: TransError.noEnabledService.localizedDescription)
+            return
+        }
+        selectionPopup.update(outputs: results)
+    }
+
+    private func presentOCRPopup(historyMode: String) async {
+        let text = ocrText
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            selectionPopup.showMessage("未识别到文字", title: "OCR 翻译", at: NSEvent.mouseLocation)
+            return
+        }
+        await presentPopup(text: text, title: "OCR 翻译", historyMode: historyMode, at: NSEvent.mouseLocation, force: true)
     }
 
     private func translateOutputs(for text: String) async -> [TranslationOutput] {
