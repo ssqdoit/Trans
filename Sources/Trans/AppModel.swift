@@ -455,7 +455,7 @@ final class AppModel: ObservableObject {
             lastShownText: selectionPopup.lastShownText,
             isPopupVisible: selectionPopup.isVisible
         ) else { return }
-        selectionPopup.show(text: text, at: location)
+        selectionPopup.show(text: text, source: sourceLanguage, target: targetLanguage, at: location)
         let results = await translateOutputs(for: text)
         // A newer selection may have replaced this popup while we were translating.
         guard selectionPopup.state.sourceText == text else { return }
