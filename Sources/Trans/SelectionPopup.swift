@@ -10,6 +10,7 @@ final class SelectionPopupState: ObservableObject {
     @Published var message: String?
     @Published var sourceLanguage: Language = .auto
     @Published var targetLanguage: Language = .zhHans
+    @Published var isPinned = false
 }
 
 /// Borderless panel that can take key status for in-popup interaction without
@@ -20,7 +21,7 @@ private final class SelectionPopupPanel: NSPanel {
 
 @MainActor
 final class SelectionPopupController {
-    static let panelWidth: CGFloat = 380
+    static let panelWidth: CGFloat = 408
     static let editDebounceNanoseconds: UInt64 = 800_000_000
     let state = SelectionPopupState()
     var onOpenInMainWindow: (() -> Void)?
@@ -32,11 +33,20 @@ final class SelectionPopupController {
     private var editDebounceTask: Task<Void, Never>?
     private var lastMouse = CGPoint.zero
     private(set) var lastShownText: String?
+    private(set) var sessionID = UUID()
 
     var isVisible: Bool { panel?.isVisible ?? false }
 
-    func show(text: String, title: String = "划词翻译", source: Language, target: Language, at mouse: CGPoint) {
+    @discardableResult
+    func show(
+        text: String,
+        title: String = "划词翻译",
+        source: Language,
+        target: Language,
+        at mouse: CGPoint
+    ) -> UUID {
         editDebounceTask?.cancel()
+        sessionID = UUID()
         state.title = title
         state.sourceText = text
         state.sourceLanguage = source
@@ -47,10 +57,12 @@ final class SelectionPopupController {
         lastShownText = text
         lastMouse = mouse
         presentAfterLayout()
+        return sessionID
     }
 
     func showMessage(_ message: String, title: String = "划词翻译", at mouse: CGPoint) {
         editDebounceTask?.cancel()
+        sessionID = UUID()
         state.title = title
         state.sourceText = ""
         state.outputs = []
@@ -63,10 +75,13 @@ final class SelectionPopupController {
 
     /// Marks a retranslation in flight (edit or language change) without
     /// resetting the shown text or reopening the panel at a new location.
-    func beginTranslating() {
+    @discardableResult
+    func beginTranslating() -> UUID {
+        sessionID = UUID()
         state.message = nil
         state.isTranslating = true
         if isVisible { presentAfterLayout() }
+        return sessionID
     }
 
     func update(outputs: [TranslationOutput]) {
@@ -83,6 +98,7 @@ final class SelectionPopupController {
 
     func dismiss() {
         editDebounceTask?.cancel()
+        sessionID = UUID()
         removeDismissMonitors()
         panel?.orderOut(nil)
     }
@@ -121,6 +137,10 @@ final class SelectionPopupController {
         // final pair; AppModel dedupes the repeated callback.
     }
 
+    fileprivate func togglePinned() {
+        state.isPinned.toggle()
+    }
+
     private func presentAfterLayout() {
         let panel = ensurePanel()
         // SwiftUI applies published changes on the next runloop pass; measure after that.
@@ -151,6 +171,11 @@ final class SelectionPopupController {
                 self?.dismiss()
             },
             onClose: { [weak self] in self?.dismiss() },
+            onTogglePin: { [weak self] in self?.togglePinned() },
+            onRetry: { [weak self] in
+                guard let self else { return }
+                self.onRetranslate?(self.state.sourceText)
+            },
             onEdit: { [weak self] in self?.sourceTextEdited() },
             onLanguageChange: { [weak self] in self?.languagesEdited() },
             onSwap: { [weak self] in self?.swapLanguages() }
@@ -171,6 +196,7 @@ final class SelectionPopupController {
         panel.becomesKeyOnlyIfNeeded = true
         panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.animationBehavior = .utilityWindow
         panel.contentView = hosting
         self.panel = panel
         hostingView = hosting
@@ -182,7 +208,10 @@ final class SelectionPopupController {
         let global = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown],
             handler: { [weak self] _ in
-                Task { @MainActor in self?.dismiss() }
+                Task { @MainActor in
+                    guard let self, !self.state.isPinned else { return }
+                    self.dismiss()
+                }
             }
         )
         let local = NSEvent.addLocalMonitorForEvents(
@@ -191,11 +220,23 @@ final class SelectionPopupController {
                 guard let self else { return event }
                 let inPopup = event.window is SelectionPopupPanel
                 if event.type == .keyDown {
-                    guard event.keyCode == 53, inPopup else { return event } // Esc
-                    Task { @MainActor in self.dismiss() }
-                    return nil
+                    guard inPopup else { return event }
+                    let command = event.modifierFlags.contains(.command)
+                    switch (event.charactersIgnoringModifiers?.lowercased(), command, event.keyCode) {
+                    case (_, _, 53), ("w", true, _):
+                        Task { @MainActor in self.dismiss() }
+                        return nil
+                    case ("p", true, _):
+                        self.togglePinned()
+                        return nil
+                    case ("r", true, _):
+                        self.onRetranslate?(self.state.sourceText)
+                        return nil
+                    default:
+                        return event
+                    }
                 }
-                if !inPopup { Task { @MainActor in self.dismiss() } }
+                if !inPopup, !state.isPinned { Task { @MainActor in self.dismiss() } }
                 return event
             }
         )
@@ -222,6 +263,8 @@ struct SelectionPopupView: View {
     var onCopy: (String) -> Void
     var onOpenMain: () -> Void
     var onClose: () -> Void
+    var onTogglePin: () -> Void
+    var onRetry: () -> Void
     var onEdit: () -> Void
     var onLanguageChange: () -> Void
     var onSwap: () -> Void
@@ -239,67 +282,116 @@ struct SelectionPopupView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             header
             if hasSession {
-                sourceEditor
+                sourceCard
                 languageBar
             }
-            Divider()
             content
         }
-        .padding(12)
+        .padding(10)
         .frame(width: SelectionPopupController.panelWidth, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.8), lineWidth: 1)
         )
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            Text(state.title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            popupButton(
+                systemName: state.isPinned ? "pin.fill" : "pin",
+                help: state.isPinned ? "取消钉住（⌘P）" : "钉住窗口（⌘P）",
+                action: onTogglePin
+            )
+            .foregroundStyle(state.isPinned ? Color.accentColor : Color.secondary)
+            Text(state.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
             Spacer()
-            Button(action: onOpenMain) { Image(systemName: "macwindow") }
-                .buttonStyle(.borderless).help("在主窗口中打开")
-            Button(action: onClose) { Image(systemName: "xmark.circle.fill") }
-                .buttonStyle(.borderless).foregroundStyle(.secondary).help("关闭")
+            popupButton(systemName: "arrow.clockwise", help: "重新翻译（⌘R）") {
+                onRetry()
+            }
+            .disabled(state.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            popupButton(systemName: "macwindow", help: "在主窗口中打开", action: onOpenMain)
+            popupButton(systemName: "xmark", help: "关闭（⌘W / Esc）", action: onClose)
+                .foregroundStyle(.secondary)
         }
     }
 
-    /// Editable source text, auto-sizing from 1 to ~4 lines: the hidden Text
-    /// drives the height, the TextEditor scrolls beyond it.
-    private var sourceEditor: some View {
-        ZStack(alignment: .topLeading) {
-            Text(state.sourceText.isEmpty ? " " : state.sourceText)
-                .font(.callout)
-                .lineLimit(4)
-                .padding(EdgeInsets(top: 8, leading: 5, bottom: 8, trailing: 5))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .opacity(0)
-            TextEditor(text: $state.sourceText)
-                .font(.callout)
-                .scrollContentBackground(.hidden)
+    private func popupButton(
+        systemName: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.caption.weight(.medium))
+                .frame(width: 22, height: 22)
         }
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .help(help)
+    }
+
+    private var sourceCard: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text("原文").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                Spacer()
+                Button { onCopy(state.sourceText) } label: {
+                    Image(systemName: "doc.on.doc").font(.caption2)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("复制原文")
+            }
+            sourceEditor
+        }
+        .padding(10)
+        .background(
+            Color(nsColor: .controlBackgroundColor).opacity(0.72),
+            in: RoundedRectangle(cornerRadius: 9)
+        )
+    }
+
+    private var sourceEditorHeight: CGFloat {
+        let estimatedLines = state.sourceText
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .reduce(0) { total, line in total + max(1, (line.count + 27) / 28) }
+        let visibleLines = min(max(estimatedLines, 1), 4)
+        return max(CGFloat(visibleLines) * 19 + 12, 42)
+    }
+
+    /// Editable source text, auto-sizing up to four lines and scrolling beyond it.
+    private var sourceEditor: some View {
+        TextEditor(text: $state.sourceText)
+            .font(.callout)
+            .scrollContentBackground(.hidden)
+            .padding(-4)
+            .frame(height: sourceEditorHeight)
         .onChange(of: state.sourceText) { onEdit() }
     }
 
     private var languageBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Picker("源语言", selection: $state.sourceLanguage) {
                 ForEach(Language.allCases) { Text($0.rawValue).tag($0) }
             }
-            .labelsHidden().controlSize(.small).frame(width: 108)
+            .labelsHidden().controlSize(.small).frame(width: 126)
             Button(action: onSwap) { Image(systemName: "arrow.left.arrow.right") }
-                .buttonStyle(.borderless).controlSize(.small).help("交换语言")
+                .buttonStyle(.plain).controlSize(.small).foregroundStyle(.secondary).help("交换语言")
             Picker("目标语言", selection: $state.targetLanguage) {
                 ForEach(Language.allCases.filter { $0 != .auto }) { Text($0.rawValue).tag($0) }
             }
-            .labelsHidden().controlSize(.small).frame(width: 108)
+            .labelsHidden().controlSize(.small).frame(width: 126)
             Spacer()
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
         .onChange(of: state.sourceLanguage) { onLanguageChange() }
         .onChange(of: state.targetLanguage) { onLanguageChange() }
     }
@@ -312,14 +404,20 @@ struct SelectionPopupView: View {
                 Image(systemName: "exclamationmark.triangle")
             }
             .foregroundStyle(.orange)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
         } else if state.isTranslating {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 Text("翻译中…").font(.callout).foregroundStyle(.secondary)
             }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 9))
         } else {
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(results) { output in resultRow(output) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -329,9 +427,12 @@ struct SelectionPopupView: View {
     }
 
     @ViewBuilder private func resultRow(_ output: TranslationOutput) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(output.serviceName).font(.caption2).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(output.error == nil ? Color.green : Color.orange)
+                    .frame(width: 6, height: 6)
+                Text(output.serviceName).font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 Spacer()
                 if output.error == nil {
                     Button { onCopy(output.text) } label: {
@@ -346,5 +447,11 @@ struct SelectionPopupView: View {
                 Text(output.text).font(.callout).textSelection(.enabled)
             }
         }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color(nsColor: .controlBackgroundColor).opacity(0.72),
+            in: RoundedRectangle(cornerRadius: 9)
+        )
     }
 }

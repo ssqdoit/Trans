@@ -26,20 +26,54 @@ struct TransApp: App {
         }
 
         MenuBarExtra {
-            Button("输入翻译") { model.selectedSection = .translate; NSApp.activate(ignoringOtherApps: true) }
-            Button("划词翻译") { Task { await model.translateSelectionPopup() } }
+            Button {
+                model.selectedSection = .translate
+                NSApp.activate(ignoringOtherApps: true)
+            } label: {
+                MenuActionLabel("输入翻译", shortcut: model.settings.inputHotKey)
+            }
+            Button { Task { await model.translateSelectionPopup() } } label: {
+                MenuActionLabel("划词翻译", shortcut: model.settings.selectionHotKey)
+            }
             Button("静默划词翻译") { Task { await model.translateSelection(silent: true) } }
-            Button("输入框翻译") { Task { await model.translateInputBox() } }
+            Button { Task { await model.translateInputBox() } } label: {
+                MenuActionLabel("输入框翻译", shortcut: model.settings.inputBoxHotKey)
+            }
             Divider()
             Button("截图翻译") { Task { await model.screenshotAndTranslate() } }
-            Button("截图 OCR") { Task { await model.screenshotAndRecognize() } }
-            Button("静默截图 OCR") { Task { await model.screenshotAndRecognize(silent: true) } }
+            Button { Task { await model.screenshotAndRecognize() } } label: {
+                MenuActionLabel("截图 OCR", shortcut: model.settings.screenshotHotKey)
+            }
+            Button { Task { await model.screenshotAndRecognize(silent: true) } } label: {
+                MenuActionLabel("静默截图 OCR", shortcut: model.settings.ocrHotKey)
+            }
             Divider()
             Button("退出 Trans") { NSApp.terminate(nil) }
         } label: {
             Image(nsImage: TransMenuBarIcon.image)
                 .accessibilityLabel("Trans")
         }
+    }
+}
+
+private struct MenuActionLabel: View {
+    private let title: String
+    private let shortcut: String
+
+    init(_ title: String, shortcut: String) {
+        self.title = title
+        self.shortcut = shortcut
+    }
+
+    var body: some View {
+        HStack(spacing: 24) {
+            Text(title)
+            Spacer(minLength: 24)
+            Text(shortcut)
+                .font(.body.monospaced())
+                .foregroundStyle(.secondary)
+        }
+        .frame(minWidth: 210)
     }
 }
 

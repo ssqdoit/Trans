@@ -41,6 +41,7 @@ final class AppModel: ObservableObject {
     private var workspaceObserver: NSObjectProtocol?
     private var clipboardTimer: Timer?
     private var lastClipboardChange = NSPasteboard.general.changeCount
+    private var recognitionGeneration = 0
 
     init(
         persistence: PersistenceStore = .shared,
@@ -179,7 +180,7 @@ final class AppModel: ObservableObject {
         ocrBlocks = []
         qrCodes = []
         for (index, image) in images.enumerated() {
-            await recognize(image: image, mode: "选图 OCR", shouldTranslate: false, append: index > 0)
+            _ = await recognize(image: image, mode: "选图 OCR", shouldTranslate: false, append: index > 0)
         }
         if settings.autoTranslate, !ocrText.isEmpty {
             sourceText = ocrText
@@ -192,10 +193,10 @@ final class AppModel: ObservableObject {
         do {
             let image = try await captureService.interactiveScreenshot()
             if silent, OCRPresentationPolicy.shouldShowPopup(trigger: .silentScreenshot, isAppActive: NSApp.isActive) {
-                await recognize(image: image, mode: "静默截图 OCR", shouldTranslate: false)
-                await presentOCRPopup(historyMode: "静默截图 OCR")
+                let outcome = await recognize(image: image, mode: "静默截图 OCR", shouldTranslate: false)
+                await presentOCRPopup(outcome: outcome, historyMode: "静默截图 OCR")
             } else {
-                await recognize(image: image, mode: silent ? "静默截图 OCR" : "截图 OCR")
+                _ = await recognize(image: image, mode: silent ? "静默截图 OCR" : "截图 OCR")
                 if !silent { selectedSection = .ocr; activate() }
             }
         } catch { show(error.localizedDescription) }
@@ -204,29 +205,47 @@ final class AppModel: ObservableObject {
     func screenshotAndTranslate() async {
         do {
             let image = try await captureService.interactiveScreenshot()
-            await recognize(image: image, mode: "截图翻译", shouldTranslate: true)
-            selectedSection = .translate
-            activate()
+            let outcome = await recognize(image: image, mode: "截图翻译", shouldTranslate: false)
+            if OCRPresentationPolicy.shouldShowPopup(trigger: .screenshotTranslation, isAppActive: NSApp.isActive) {
+                await presentOCRPopup(outcome: outcome, historyMode: "截图翻译")
+            }
         } catch { show(error.localizedDescription) }
     }
 
     func recognizeClipboard() async {
         guard let image = captureService.imageFromPasteboard() else { show("剪贴板中没有图片"); return }
         let popup = OCRPresentationPolicy.shouldShowPopup(trigger: .clipboard, isAppActive: NSApp.isActive)
-        await recognize(image: image, mode: "剪贴板 OCR", shouldTranslate: popup ? false : nil)
-        if popup { await presentOCRPopup(historyMode: "剪贴板 OCR") }
+        let outcome = await recognize(image: image, mode: "剪贴板 OCR", shouldTranslate: popup ? false : nil)
+        if popup { await presentOCRPopup(outcome: outcome, historyMode: "剪贴板 OCR") }
     }
 
-    func recognize(image: NSImage, mode: String, shouldTranslate: Bool? = nil, append: Bool = false) async {
+    @discardableResult
+    func recognize(
+        image: NSImage,
+        mode: String,
+        shouldTranslate: Bool? = nil,
+        append: Bool = false
+    ) async -> OCRRecognitionOutcome {
+        recognitionGeneration += 1
+        let generation = recognitionGeneration
+        let shouldAppend = append || (continuousOCR && !ocrText.isEmpty)
         isRecognizing = true
         ocrImage = image
+        if !shouldAppend {
+            ocrText = ""
+            ocrBlocks = []
+            qrCodes = []
+        }
+        defer {
+            if generation == recognitionGeneration { isRecognizing = false }
+        }
         do {
             let result = try await ocrService.recognize(
                 image: image,
                 languages: [sourceLanguage],
                 smartParagraphs: settings.smartParagraphs
             )
-            let shouldAppend = append || (continuousOCR && !ocrText.isEmpty)
+            guard generation == recognitionGeneration else { return .superseded }
             if shouldAppend {
                 ocrBlocks.append(contentsOf: result.blocks)
                 if !result.text.isEmpty { ocrText += (ocrText.isEmpty ? "" : "\n\n") + result.text }
@@ -245,8 +264,12 @@ final class AppModel: ObservableObject {
                 selectedSection = .translate
                 await translate(mode: mode)
             }
-        } catch { show(error.localizedDescription) }
-        isRecognizing = false
+            return .success(text: ocrText)
+        } catch {
+            guard generation == recognitionGeneration else { return .superseded }
+            show(error.localizedDescription)
+            return .failure(message: error.localizedDescription)
+        }
     }
 
     func toggleContinuousOCR() {
@@ -262,8 +285,8 @@ final class AppModel: ObservableObject {
                       let image = self.captureService.imageFromPasteboard() else { return }
                 self.lastClipboardChange = NSPasteboard.general.changeCount
                 let popup = OCRPresentationPolicy.shouldShowPopup(trigger: .continuous, isAppActive: NSApp.isActive)
-                await self.recognize(image: image, mode: "连续 OCR", shouldTranslate: popup ? false : nil)
-                if popup { await self.presentOCRPopup(historyMode: "连续 OCR") }
+                let outcome = await self.recognize(image: image, mode: "连续 OCR", shouldTranslate: popup ? false : nil)
+                if popup { await self.presentOCRPopup(outcome: outcome, historyMode: "连续 OCR") }
             }
         }
     }
@@ -483,10 +506,17 @@ final class AppModel: ObservableObject {
             lastShownText: selectionPopup.lastShownText,
             isPopupVisible: selectionPopup.isVisible
         ) else { return }
-        selectionPopup.show(text: text, title: title, source: sourceLanguage, target: targetLanguage, at: location)
+        let sessionID = selectionPopup.show(
+            text: text,
+            title: title,
+            source: sourceLanguage,
+            target: targetLanguage,
+            at: location
+        )
         let results = await translateOutputs(for: text)
         // A newer selection or an in-popup edit may have replaced this text.
-        guard selectionPopup.state.sourceText == text else { return }
+        guard selectionPopup.sessionID == sessionID,
+              selectionPopup.state.sourceText == text else { return }
         if results.isEmpty {
             selectionPopup.fail(message: TransError.noEnabledService.localizedDescription)
             return
@@ -507,12 +537,13 @@ final class AppModel: ObservableObject {
     private func retranslatePopup() async {
         let text = selectionPopup.state.sourceText
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        selectionPopup.beginTranslating()
+        let sessionID = selectionPopup.beginTranslating()
         let source = sourceLanguage
         let target = targetLanguage
         let results = await translateOutputs(for: text)
         // Drop stale results if the text or languages changed mid-flight.
-        guard selectionPopup.state.sourceText == text,
+        guard selectionPopup.sessionID == sessionID,
+              selectionPopup.state.sourceText == text,
               sourceLanguage == source, targetLanguage == target else { return }
         if results.isEmpty {
             selectionPopup.fail(message: TransError.noEnabledService.localizedDescription)
@@ -521,13 +552,21 @@ final class AppModel: ObservableObject {
         selectionPopup.update(outputs: results)
     }
 
-    private func presentOCRPopup(historyMode: String) async {
-        let text = ocrText
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            selectionPopup.showMessage("未识别到文字", title: "OCR 翻译", at: NSEvent.mouseLocation)
-            return
+    private func presentOCRPopup(outcome: OCRRecognitionOutcome, historyMode: String) async {
+        switch OCRPopupResultPolicy.presentation(for: outcome) {
+        case .translate(let text):
+            await presentPopup(
+                text: text,
+                title: "OCR 翻译",
+                historyMode: historyMode,
+                at: NSEvent.mouseLocation,
+                force: true
+            )
+        case .message(let message):
+            selectionPopup.showMessage(message, title: "OCR 翻译", at: NSEvent.mouseLocation)
+        case .none:
+            break
         }
-        await presentPopup(text: text, title: "OCR 翻译", historyMode: historyMode, at: NSEvent.mouseLocation, force: true)
     }
 
     private func translateOutputs(for text: String) async -> [TranslationOutput] {

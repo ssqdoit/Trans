@@ -151,7 +151,7 @@ private struct TranslationView: View {
                 Button { Task { await model.screenshotAndTranslate() } } label: {
                     Label("截图翻译", systemImage: "viewfinder")
                 }
-                Button { Task { await model.translateSelection() } } label: {
+                Button { Task { await model.translateSelectionPopup() } } label: {
                     Label("划词翻译", systemImage: "text.cursor")
                 }
                 .buttonStyle(.bordered)

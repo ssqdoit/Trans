@@ -103,6 +103,11 @@ final class HotKeyRegistrationReportTests: XCTestCase {
 }
 
 final class OCRPresentationPolicyTests: XCTestCase {
+    func testScreenshotTranslationAlwaysUsesPopup() {
+        XCTAssertTrue(OCRPresentationPolicy.shouldShowPopup(trigger: .screenshotTranslation, isAppActive: true))
+        XCTAssertTrue(OCRPresentationPolicy.shouldShowPopup(trigger: .screenshotTranslation, isAppActive: false))
+    }
+
     func testSilentScreenshotAlwaysShowsPopup() {
         XCTAssertTrue(OCRPresentationPolicy.shouldShowPopup(trigger: .silentScreenshot, isAppActive: true))
         XCTAssertTrue(OCRPresentationPolicy.shouldShowPopup(trigger: .silentScreenshot, isAppActive: false))
@@ -116,6 +121,28 @@ final class OCRPresentationPolicyTests: XCTestCase {
     func testContinuousShowsPopupOnlyWhenAppInBackground() {
         XCTAssertTrue(OCRPresentationPolicy.shouldShowPopup(trigger: .continuous, isAppActive: false))
         XCTAssertFalse(OCRPresentationPolicy.shouldShowPopup(trigger: .continuous, isAppActive: true))
+    }
+
+    func testFailedRecognitionNeverPresentsStaleText() {
+        XCTAssertEqual(
+            OCRPopupResultPolicy.presentation(for: .failure(message: "Vision error")),
+            .message("识别失败：Vision error")
+        )
+    }
+
+    func testSuccessfulRecognitionRequiresNonemptyText() {
+        XCTAssertEqual(
+            OCRPopupResultPolicy.presentation(for: .success(text: "fresh text")),
+            .translate(text: "fresh text")
+        )
+        XCTAssertEqual(
+            OCRPopupResultPolicy.presentation(for: .success(text: "  \n")),
+            .message("未识别到文字")
+        )
+    }
+
+    func testSupersededRecognitionDoesNotTouchPopup() {
+        XCTAssertEqual(OCRPopupResultPolicy.presentation(for: .superseded), .none)
     }
 }
 

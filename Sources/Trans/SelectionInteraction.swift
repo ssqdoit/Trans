@@ -45,6 +45,7 @@ enum HotKeyRegistrationReport {
 }
 
 enum OCRPopupTrigger {
+    case screenshotTranslation
     case silentScreenshot
     case clipboard
     case continuous
@@ -55,8 +56,36 @@ enum OCRPopupTrigger {
 enum OCRPresentationPolicy {
     static func shouldShowPopup(trigger: OCRPopupTrigger, isAppActive: Bool) -> Bool {
         switch trigger {
+        case .screenshotTranslation: return true
         case .silentScreenshot: return true
         case .clipboard, .continuous: return !isAppActive
+        }
+    }
+}
+
+enum OCRRecognitionOutcome: Equatable {
+    case success(text: String)
+    case failure(message: String)
+    case superseded
+}
+
+enum OCRPopupPresentation: Equatable {
+    case translate(text: String)
+    case message(String)
+    case none
+}
+
+enum OCRPopupResultPolicy {
+    static func presentation(for outcome: OCRRecognitionOutcome) -> OCRPopupPresentation {
+        switch outcome {
+        case .success(let text) where !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty:
+            return .translate(text: text)
+        case .success:
+            return .message("未识别到文字")
+        case .failure(let message):
+            return .message("识别失败：\(message)")
+        case .superseded:
+            return .none
         }
     }
 }
