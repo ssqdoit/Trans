@@ -1,10 +1,11 @@
 import AppKit
 import SwiftUI
 import ServiceManagement
+import UniformTypeIdentifiers
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var selectedSection: AppSection = .translate
+    let navigation: NavigationStore
     @Published var sourceText = ""
     @Published var sourceLanguage: Language = .auto
     @Published var targetLanguage: Language = .zhHans
@@ -40,17 +41,22 @@ final class AppModel: ObservableObject {
     private var lastExternalApp: NSRunningApplication?
     private var workspaceObserver: NSObjectProtocol?
     private var clipboardTimer: Timer?
+    private var servicesSaveTask: Task<Void, Never>?
+    private var pluginsSaveTask: Task<Void, Never>?
+    private var settingsSaveTask: Task<Void, Never>?
     private var lastClipboardChange = NSPasteboard.general.changeCount
     private var recognitionGeneration = 0
 
     init(
         persistence: PersistenceStore = .shared,
         pluginManager: PluginManager = PluginManager(),
-        credentialStore: CredentialStore = CredentialStore()
+        credentialStore: CredentialStore = CredentialStore(),
+        navigation: NavigationStore = NavigationStore()
     ) {
         self.persistence = persistence
         self.pluginManager = pluginManager
         self.credentialStore = credentialStore
+        self.navigation = navigation
         history = persistence.load([HistoryItem].self, from: "history.json", fallback: [])
         var loadedServices = persistence.load([TranslationServiceConfig].self, from: "services.json", fallback: TranslationServiceConfig.defaults)
         let migratableKinds: Set<ServiceKind> = [.appleLocal, .google, .microsoft, .baidu, .youdao, .caiyun, .niu, .qwen, .deepseek, .kimi, .glm]
@@ -86,6 +92,8 @@ final class AppModel: ObservableObject {
         settings = persistence.load(AppSettings.self, from: "settings.json", fallback: AppSettings())
         let savedPlugins = persistence.load([InstalledPlugin].self, from: "plugins.json", fallback: [])
         plugins = pluginManager.discover(previous: savedPlugins)
+        hydratePluginCredentials()
+        applyAppearanceSettings()
         configureHotKeys()
         configureSelectionPopup()
         observeFrontmostApplication()
@@ -108,10 +116,12 @@ final class AppModel: ObservableObject {
                     await translationClient.translate(text: text, source: sourceLanguage, target: targetLanguage, using: service)
                 }
             }
+            for plugin in enabledPlugins {
+                group.addTask { [pluginManager, sourceLanguage, targetLanguage] in
+                    await pluginManager.translate(plugin: plugin, text: text, source: sourceLanguage, target: targetLanguage)
+                }
+            }
             for await result in group { outputs.append(result) }
-        }
-        for plugin in enabledPlugins {
-            outputs.append(pluginManager.translate(plugin: plugin, text: text, source: sourceLanguage, target: targetLanguage))
         }
         let configuredOrder = Dictionary(uniqueKeysWithValues: enabledServices.enumerated().map { ($0.element.id, $0.offset) })
         outputs.sort {
@@ -131,7 +141,7 @@ final class AppModel: ObservableObject {
         await restoreFocusToPreviousApp()
         do {
             sourceText = try await captureService.selectedText()
-            if !silent { selectedSection = .translate; activate() }
+            if !silent { navigation.selectedSection = .translate; activate() }
             await translate(mode: silent ? "静默划词翻译" : "划词翻译")
             if silent, let text = outputs.first(where: { $0.error == nil })?.text { copy(text) }
         } catch { show(error.localizedDescription) }
@@ -184,7 +194,7 @@ final class AppModel: ObservableObject {
         }
         if settings.autoTranslate, !ocrText.isEmpty {
             sourceText = ocrText
-            selectedSection = .translate
+            navigation.selectedSection = .translate
             await translate(mode: "多图 OCR 翻译")
         }
     }
@@ -200,7 +210,7 @@ final class AppModel: ObservableObject {
                 await presentOCRPopup(outcome: outcome, historyMode: mode)
             } else {
                 _ = await recognize(image: image, mode: mode)
-                if !silent { selectedSection = .ocr; activate() }
+                if !silent { navigation.selectedSection = .ocr; activate() }
             }
         } catch { show(error.localizedDescription) }
     }
@@ -264,7 +274,7 @@ final class AppModel: ObservableObject {
             }
             if (shouldTranslate ?? settings.autoTranslate), !result.text.isEmpty {
                 sourceText = ocrText
-                selectedSection = .translate
+                navigation.selectedSection = .translate
                 await translate(mode: mode)
             }
             return .success(text: ocrText)
@@ -307,7 +317,7 @@ final class AppModel: ObservableObject {
         sourceLanguage = item.sourceLanguage
         targetLanguage = item.targetLanguage
         outputs = item.outputs
-        selectedSection = .translate
+        navigation.selectedSection = .translate
     }
 
     func toggleFavorite(_ id: UUID) {
@@ -324,6 +334,23 @@ final class AppModel: ObservableObject {
     func clearHistory() { history.removeAll(); saveHistory() }
 
     func saveServices() {
+        servicesSaveTask?.cancel()
+        persistServices()
+    }
+
+    /// Configuration editors publish on every keystroke. Delay persistence so
+    /// a text edit (or leaving the page) never performs synchronous Keychain
+    /// and JSON work in the same interaction frame.
+    func scheduleServicesSave() {
+        servicesSaveTask?.cancel()
+        servicesSaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.persistServices()
+        }
+    }
+
+    private func persistServices() {
         for service in services {
             credentialStore.set(service.apiKey, for: service.id.uuidString)
             credentialStore.set(service.secretKey ?? "", for: service.id.uuidString + ".secret")
@@ -336,8 +363,68 @@ final class AppModel: ObservableObject {
         }
         persistence.save(sanitized, to: "services.json")
     }
-    func saveSettings() { persistence.save(settings, to: "settings.json") }
-    func savePlugins() { persistence.save(plugins, to: "plugins.json") }
+
+    func saveSettings() {
+        applyAppearanceSettings()
+        settingsSaveTask?.cancel()
+        persistence.save(settings, to: "settings.json")
+    }
+
+    func scheduleSettingsSave() {
+        settingsSaveTask?.cancel()
+        settingsSaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.persistence.save(self.settings, to: "settings.json")
+        }
+    }
+
+    func applyAppearanceSettings() {
+        let preference = ColorSchemePreference(rawValue: settings.colorScheme) ?? .system
+        applyAppearance(preference)
+    }
+
+    func setColorScheme(_ rawValue: String) {
+        let preference = ColorSchemePreference(rawValue: rawValue) ?? .system
+        // Apply before publishing the new setting. This prevents SwiftUI from
+        // rendering a system-inheriting view against the previous forced
+        // application appearance during the same update transaction.
+        applyAppearance(preference)
+        settings.colorScheme = preference.rawValue
+    }
+
+    private func applyAppearance(_ preference: ColorSchemePreference) {
+        NSApp.appearance = preference.nsAppearance
+        selectionPopup.setColorScheme(preference)
+    }
+    func savePlugins() {
+        pluginsSaveTask?.cancel()
+        persistPlugins()
+    }
+
+    func schedulePluginsSave() {
+        pluginsSaveTask?.cancel()
+        pluginsSaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.persistPlugins()
+        }
+    }
+
+    private func persistPlugins() {
+        var sanitized = plugins
+        for index in sanitized.indices {
+            for option in sanitized[index].options where option.isSecure {
+                let value = plugins[index].optionValues[option.identifier] ?? ""
+                credentialStore.set(value, for: pluginCredentialAccount(
+                    pluginID: sanitized[index].identifier,
+                    optionID: option.identifier
+                ))
+                sanitized[index].optionValues[option.identifier] = ""
+            }
+        }
+        persistence.save(sanitized, to: "plugins.json")
+    }
 
     @discardableResult
     func addService(kind: ServiceKind = .openAI) -> UUID {
@@ -380,19 +467,77 @@ final class AppModel: ObservableObject {
 
     func installPlugin() {
         let panel = NSOpenPanel()
-        panel.canChooseFiles = false
+        panel.canChooseFiles = true
         panel.canChooseDirectories = true
-        panel.message = "选择包含 manifest.json 和 main.js 的 Trans 插件目录"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            _ = try pluginManager.install(from: url, previous: plugins)
-            plugins = pluginManager.discover(previous: plugins)
-            savePlugins()
-        } catch { show(error.localizedDescription) }
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.folder, .zip, UTType(filenameExtension: "zip")].compactMap { $0 }
+        panel.message = "选择 Trans .zip/.zip 文件，或包含 manifest.json 和 main.js 的插件目录"
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        var imported = 0
+        var failures: [String] = []
+        for url in panel.urls {
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            do {
+                _ = try pluginManager.install(from: url, previous: plugins)
+                imported += 1
+            } catch {
+                failures.append("\(url.lastPathComponent)：\(error.localizedDescription)")
+            }
+        }
+        plugins = pluginManager.discover(previous: plugins)
+        hydratePluginCredentials()
+        savePlugins()
+        if failures.isEmpty {
+            show("已导入 \(imported) 个插件")
+        } else {
+            show(failures.joined(separator: "\n"))
+        }
+    }
+
+    private func hydratePluginCredentials() {
+        for index in plugins.indices {
+            for option in plugins[index].options where option.isSecure {
+                let account = pluginCredentialAccount(
+                    pluginID: plugins[index].identifier,
+                    optionID: option.identifier
+                )
+                if let value = credentialStore.value(for: account) {
+                    plugins[index].optionValues[option.identifier] = value
+                }
+            }
+        }
+    }
+
+    private func pluginCredentialAccount(pluginID: String, optionID: String) -> String {
+        "plugin.\(pluginID).\(optionID)"
+    }
+
+    func resetPluginConfiguration(_ plugin: InstalledPlugin) {
+        guard let index = plugins.firstIndex(where: { $0.identifier == plugin.identifier }) else { return }
+        for option in plugins[index].options {
+            plugins[index].optionValues[option.identifier] = option.defaultValue ?? ""
+            if option.isSecure {
+                credentialStore.remove(pluginCredentialAccount(pluginID: plugin.identifier, optionID: option.identifier))
+            }
+        }
+        savePlugins()
+    }
+
+    func openPluginHomepage(_ plugin: InstalledPlugin) {
+        guard let homepage = plugin.homepage, let url = URL(string: homepage) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     func uninstallPlugin(_ plugin: InstalledPlugin) {
-        do { try pluginManager.uninstall(plugin); plugins.removeAll { $0.id == plugin.id }; savePlugins() }
+        do {
+            try pluginManager.uninstall(plugin)
+            for option in plugin.options where option.isSecure {
+                credentialStore.remove(pluginCredentialAccount(pluginID: plugin.identifier, optionID: option.identifier))
+            }
+            plugins.removeAll { $0.id == plugin.id }
+            savePlugins()
+        }
         catch { show(error.localizedDescription) }
     }
 
@@ -429,7 +574,7 @@ final class AppModel: ObservableObject {
         case "translate":
             if let text = components?.queryItems?.first(where: { $0.name == "text" })?.value {
                 sourceText = text
-                selectedSection = .translate
+                navigation.selectedSection = .translate
                 activate()
                 Task { await translate(mode: "URL Scheme") }
             }
@@ -447,7 +592,7 @@ final class AppModel: ObservableObject {
                 switch action {
                 case .selection: await self.translateSelectionPopup()
                 case .screenshot: await self.screenshotAndRecognize(silent: false)
-                case .input: self.selectedSection = .translate; self.activate()
+                case .input: self.navigation.selectedSection = .translate; self.activate()
                 case .ocr: await self.screenshotAndRecognize(silent: true)
                 case .inputBox: await self.translateInputBox()
                 }
@@ -463,11 +608,11 @@ final class AppModel: ObservableObject {
             let text = selectionPopup.state.sourceText
             if selectionPopup.state.kind == .ocr {
                 if !text.isEmpty { ocrText = text }
-                selectedSection = .ocr
+                navigation.selectedSection = .ocr
             } else {
                 if !text.isEmpty { sourceText = text }
                 if !selectionPopup.state.outputs.isEmpty { outputs = selectionPopup.state.outputs }
-                selectedSection = .translate
+                navigation.selectedSection = .translate
             }
             activate()
         }
@@ -602,10 +747,12 @@ final class AppModel: ObservableObject {
                     await translationClient.translate(text: text, source: sourceLanguage, target: targetLanguage, using: service)
                 }
             }
+            for plugin in enabledPlugins {
+                group.addTask { [pluginManager, sourceLanguage, targetLanguage] in
+                    await pluginManager.translate(plugin: plugin, text: text, source: sourceLanguage, target: targetLanguage)
+                }
+            }
             for await result in group { results.append(result) }
-        }
-        for plugin in enabledPlugins {
-            results.append(pluginManager.translate(plugin: plugin, text: text, source: sourceLanguage, target: targetLanguage))
         }
         let order = Dictionary(uniqueKeysWithValues: enabledServices.enumerated().map { ($0.element.id, $0.offset) })
         results.sort { (order[$0.serviceID] ?? .max) < (order[$1.serviceID] ?? .max) }
@@ -659,5 +806,8 @@ final class AppModel: ObservableObject {
             NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver)
         }
         clipboardTimer?.invalidate()
+        servicesSaveTask?.cancel()
+        pluginsSaveTask?.cancel()
+        settingsSaveTask?.cancel()
     }
 }

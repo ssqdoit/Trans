@@ -37,6 +37,7 @@ final class SelectionPopupController {
     private var hostingView: NSHostingView<SelectionPopupView>?
     private var dismissMonitors: [Any] = []
     private var editDebounceTask: Task<Void, Never>?
+    private var colorSchemePreference: ColorSchemePreference = .system
     private var lastMouse = CGPoint.zero
     private(set) var lastShownText: String?
     /// The text this session was opened with; unlike lastShownText it is not
@@ -46,6 +47,19 @@ final class SelectionPopupController {
     private(set) var sessionID = UUID()
 
     var isVisible: Bool { panel?.isVisible ?? false }
+
+    func setColorScheme(_ preference: ColorSchemePreference) {
+        colorSchemePreference = preference
+        panel?.appearance = Self.appearance(for: preference)
+    }
+
+    private static func appearance(for preference: ColorSchemePreference) -> NSAppearance? {
+        switch preference {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+    }
 
     @discardableResult
     func show(
@@ -233,6 +247,7 @@ final class SelectionPopupController {
         panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.animationBehavior = .utilityWindow
+        panel.appearance = Self.appearance(for: colorSchemePreference)
         panel.contentView = hosting
         self.panel = panel
         hostingView = hosting
@@ -427,13 +442,13 @@ struct SelectionPopupView: View {
     private var languageBar: some View {
         HStack(spacing: 8) {
             Picker("源语言", selection: $state.sourceLanguage) {
-                ForEach(Language.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(Language.allCases) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
             }
             .labelsHidden().controlSize(.small).frame(width: 126)
             Button(action: onSwap) { Image(systemName: "arrow.left.arrow.right") }
                 .buttonStyle(.plain).controlSize(.small).foregroundStyle(.secondary).help("交换语言")
             Picker("目标语言", selection: $state.targetLanguage) {
-                ForEach(Language.allCases.filter { $0 != .auto }) { Text($0.rawValue).tag($0) }
+                ForEach(Language.allCases.filter { $0 != .auto }) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
             }
             .labelsHidden().controlSize(.small).frame(width: 126)
             Spacer()
@@ -448,7 +463,7 @@ struct SelectionPopupView: View {
     @ViewBuilder private var content: some View {
         if let message = state.message {
             Label {
-                Text(message).font(.callout)
+                Text(LocalizedStringKey(message)).font(.callout)
             } icon: {
                 Image(systemName: "exclamationmark.triangle")
             }

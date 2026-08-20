@@ -2,18 +2,19 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var navigation: NavigationStore
 
     var body: some View {
         GeometryReader { geometry in
             if geometry.size.width < 700 {
                 VStack(spacing: 0) {
-                    CompactNavigationBar(selection: $model.selectedSection)
+                    CompactNavigationBar(selection: $navigation.selectedSection)
                     Divider()
                     detailContent
                 }
             } else {
                 NavigationSplitView {
-                    SidebarView(selection: $model.selectedSection)
+                    SidebarView(selection: $navigation.selectedSection)
                         .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 230)
                 } detail: {
                     detailContent
@@ -21,33 +22,41 @@ struct ContentView: View {
                 .navigationSplitViewStyle(.balanced)
             }
         }
+        .background(TransTheme.canvas)
         .background {
             if #available(macOS 15.0, *) {
                 AppleTranslationHost()
             }
         }
+        .tint(TransTheme.accent)
         .onOpenURL(perform: model.handle)
         .onAppear {
+            NSApplication.shared.applicationIconImage = TransBrand.icon
             NSApp.windows
                 .filter { !($0 is NSPanel) } // keep the selection popup's own level
                 .forEach { $0.level = model.settings.keepOnTop ? .floating : .normal }
         }
+        // SwiftUI's built-in localization reads Localizable.strings through
+        // the view locale.  Keeping this at the root lets the language picker
+        // take effect immediately without restarting the app.
+        .environment(
+            \.locale,
+            (InterfaceLanguage(rawValue: model.settings.interfaceLanguage) ?? .system).locale
+        )
+        // Recreate localized views when the locale changes. SwiftUI may retain
+        // resolved LocalizedStringKey views across an environment-only update.
+        .id(model.settings.interfaceLanguage)
     }
 
     private var detailContent: some View {
         ZStack(alignment: .bottom) {
-            Group {
-                switch model.selectedSection {
-                case .translate: TranslationView()
-                case .ocr: OCRView()
-                case .history: HistoryView()
-                case .services: ServicesView()
-                case .plugins: PluginsView()
-                case .settings: SettingsView()
-                }
-            }
+            // Keep only the active page in the layout tree. Previously every
+            // visited page stayed in this ZStack with opacity 0, so resizing
+            // the window remeasured all of the heavy pages (OCR, services,
+            // plugins, etc.) on every drag event.
+            sectionView(navigation.selectedSection)
             if let message = model.statusMessage {
-                Text(message)
+                Text(LocalizedStringKey(message))
                     .font(.callout.weight(.medium))
                     .lineLimit(3)
                     .multilineTextAlignment(.center)
@@ -60,6 +69,19 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: model.statusMessage)
+        .background(TransTheme.canvas)
+    }
+
+    @ViewBuilder
+    private func sectionView(_ section: AppSection) -> some View {
+        switch section {
+        case .translate: TranslationView()
+        case .ocr: OCRView()
+        case .history: HistoryView()
+        case .services: ServicesView()
+        case .plugins: PluginsView()
+        case .settings: SettingsView()
+        }
     }
 }
 
@@ -75,21 +97,21 @@ private struct CompactNavigationBar: View {
                     } label: {
                         VStack(spacing: 2) {
                             Image(systemName: item.symbol)
-                            Text(item.rawValue).font(.system(size: 9))
+                            Text(LocalizedStringKey(item.rawValue)).font(.system(size: 9))
                         }
                         .frame(minWidth: 52)
                         .padding(.vertical, 5)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(selection == item ? Color.accentColor : Color.secondary)
-                    .background(selection == item ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                    .foregroundStyle(selection == item ? Color.white : Color.secondary)
+                    .background(selection == item ? TransTheme.accent : Color.clear, in: RoundedRectangle(cornerRadius: 9))
                 }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
         }
-        .background(.thinMaterial)
+        .background(TransTheme.sidebar)
     }
 }
 
@@ -99,7 +121,7 @@ private struct SidebarView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image(nsImage: NSApplication.shared.applicationIconImage)
+                Image(nsImage: TransBrand.icon)
                     .resizable()
                     .interpolation(.high)
                     .frame(width: 48, height: 48)
@@ -113,12 +135,28 @@ private struct SidebarView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 18)
 
-            List(AppSection.allCases, selection: $selection) { item in
-                Label(item.rawValue, systemImage: item.symbol)
-                    .tag(item)
-                    .padding(.vertical, 4)
+            ScrollView {
+                LazyVStack(spacing: 5) {
+                    ForEach(AppSection.allCases) { item in
+                        Button {
+                            selection = item
+                        } label: {
+                            Label(LocalizedStringKey(item.rawValue), systemImage: item.symbol)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(selection == item ? Color.white : Color.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 11)
+                                .background(selection == item ? TransTheme.accent : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             }
-            .listStyle(.sidebar)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("全局快捷键").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -128,9 +166,10 @@ private struct SidebarView: View {
                 shortcut("rectangle.dashed.badge.record", "⌥F", "静默 OCR")
                 shortcut("rectangle.and.pencil.and.ellipsis", "⌥T", "输入框翻译")
             }
-            .padding(16)
+            .padding(14)
+            .overlay(alignment: .top) { Divider().padding(.horizontal, 14) }
         }
-        .background(.thinMaterial)
+        .background(TransTheme.sidebar)
     }
 
     private func shortcut(_ icon: String, _ key: String, _ title: String) -> some View {
@@ -167,7 +206,9 @@ private struct TranslationView: View {
                     VStack(spacing: 16) {
                         sourceCard
                         if model.isTranslating {
-                            ProgressView("正在请求翻译服务…").frame(maxWidth: .infinity).padding(30)
+                            ProgressView("正在请求翻译服务…")
+                                .frame(maxWidth: .infinity)
+                                .padding(24)
                         }
                         ForEach(model.outputs) { output in
                             ResultCard(output: output, target: model.targetLanguage)
@@ -229,19 +270,18 @@ private struct TranslationView: View {
             }
             .padding(12)
         }
-        .background(.background, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.separator.opacity(0.7)))
+        .clashCard()
     }
 
     private var languageControls: some View {
         HStack(spacing: 8) {
             Picker("源语言", selection: $model.sourceLanguage) {
-                ForEach(Language.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(Language.allCases) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
             }.labelsHidden().frame(minWidth: 105, idealWidth: 145, maxWidth: 150)
             Button { model.swapLanguages() } label: { Image(systemName: "arrow.left.arrow.right") }
                 .buttonStyle(.plain).foregroundStyle(.secondary)
             Picker("目标语言", selection: $model.targetLanguage) {
-                ForEach(Language.allCases.filter { $0 != .auto }) { Text($0.rawValue).tag($0) }
+                ForEach(Language.allCases.filter { $0 != .auto }) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
             }.labelsHidden().frame(minWidth: 105, idealWidth: 145, maxWidth: 150)
         }
     }
@@ -282,8 +322,8 @@ private struct ResultCard: View {
                 Text(output.text).font(.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(16)
             }
         }
-        .background(.background, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.separator.opacity(0.7)))
+        .padding(.vertical, 10)
+        .clashCard()
     }
 
     private var resultIdentity: some View {
@@ -327,8 +367,12 @@ private struct OCRView: View {
                     .buttonStyle(.borderedProminent)
             }
             Divider()
+            inputOptionsBar
+            Divider()
             GeometryReader { geometry in
-                if geometry.size.width >= horizontalBreakpoint {
+                if model.ocrImage == nil {
+                    resultPane
+                } else if geometry.size.width >= horizontalBreakpoint {
                     HSplitView {
                         imagePane
                             .frame(minWidth: 280, idealWidth: geometry.size.width * 0.48)
@@ -356,45 +400,26 @@ private struct OCRView: View {
     }
 
     private var imagePane: some View {
-        VStack(spacing: 12) {
-            Group {
-                if let image = model.ocrImage {
-                    GeometryReader { geometry in
-                        ScrollView([.horizontal, .vertical]) {
-                            Image(nsImage: image)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(
-                                    width: max(geometry.size.width - 20, 1),
-                                    height: max(geometry.size.height - 20, 1)
-                                )
-                                .padding(10)
-                        }
+        Group {
+            if let image = model.ocrImage {
+                GeometryReader { geometry in
+                    ScrollView([.horizontal, .vertical]) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(
+                                width: max(geometry.size.width - 24, 1),
+                                height: max(geometry.size.height - 24, 1)
+                            )
+                            .padding(12)
                     }
-                } else {
-                    OCRCapturePlaceholder(
-                        shortcut: model.settings.screenshotHotKey,
-                        onCapture: { Task { await model.screenshotAndRecognize() } },
-                        onChoose: { Task { await model.chooseAndRecognize() } }
-                    )
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-
-            ViewThatFits(in: .horizontal) {
-                HStack {
-                    clipboardButton
-                    continuousToggle
-                    Spacer(minLength: 0)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    clipboardButton
-                    continuousToggle
-                }
+            } else {
+                Color.clear
             }
         }
-        .padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
     private var resultPane: some View {
@@ -403,7 +428,11 @@ private struct OCRView: View {
                 .padding(12)
             Divider()
             if model.ocrText.isEmpty {
-                EmptyHint(icon: "text.viewfinder", title: "等待识别", detail: "支持中英日韩等多语言和二维码")
+                EmptyHint(
+                    icon: "text.viewfinder",
+                    title: "开始文字识别",
+                    detail: "使用右上角截图或选择图片，也可从剪贴板读取\n支持中英日韩等多语言和二维码"
+                )
             } else {
                 TextEditor(text: $model.ocrText)
                     .scrollContentBackground(.hidden)
@@ -424,6 +453,24 @@ private struct OCRView: View {
                 }
             }
         }
+    }
+
+    private var inputOptionsBar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                clipboardButton
+                Divider().frame(height: 18)
+                continuousToggle
+                Spacer(minLength: 0)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                clipboardButton
+                continuousToggle
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(.bar)
     }
 
     private var resultToolbar: some View {
@@ -456,14 +503,16 @@ private struct OCRView: View {
             }.buttonStyle(.plain).disabled(model.ocrText.isEmpty)
             Button("翻译") {
                 model.sourceText = model.ocrText
-                model.selectedSection = .translate
+                model.navigation.selectedSection = .translate
                 Task { await model.translate(mode: "OCR 翻译") }
             }.disabled(model.ocrText.isEmpty)
         }
     }
 
     private var clipboardButton: some View {
-        Button("读取剪贴板") { Task { await model.recognizeClipboard() } }
+        Button { Task { await model.recognizeClipboard() } } label: {
+            Label("读取剪贴板", systemImage: "doc.on.clipboard")
+        }
     }
 
     private var continuousToggle: some View {
@@ -497,48 +546,6 @@ private struct ShortcutKeyLabel: View {
     }
 }
 
-private struct OCRCapturePlaceholder: View {
-    let shortcut: String
-    let onCapture: () -> Void
-    let onChoose: () -> Void
-
-    var body: some View {
-        VStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(red: 0.09, green: 0.55, blue: 0.65).opacity(0.12))
-                Image(systemName: "viewfinder")
-                    .font(.system(size: 26, weight: .medium))
-                    .foregroundStyle(Color(red: 0.09, green: 0.55, blue: 0.65))
-            }
-            .frame(width: 58, height: 58)
-
-            VStack(spacing: 3) {
-                Text("截图识别").font(.headline)
-                Text("框选屏幕内容").font(.caption).foregroundStyle(.secondary)
-            }
-
-            HStack(spacing: 8) {
-                Button(action: onCapture) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "viewfinder")
-                        Text("截图")
-                        ShortcutKeyLabel(shortcut: shortcut, emphasized: true)
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                Button(action: onChoose) {
-                    Image(systemName: "photo")
-                }
-                .buttonStyle(.bordered)
-                .help("选择图片")
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(16)
-    }
-}
-
 private struct SettingsShortcutRow: View {
     let icon: String
     let title: String
@@ -549,7 +556,7 @@ private struct SettingsShortcutRow: View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.callout)
-                .foregroundStyle(emphasized ? Color(red: 0.09, green: 0.55, blue: 0.65) : Color.secondary)
+                .foregroundStyle(emphasized ? Color.accentColor : Color.secondary)
                 .frame(width: 20)
             Text(title)
             Spacer()
@@ -583,55 +590,74 @@ private struct HistoryView: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("搜索原文或译文", text: $query).textFieldStyle(.plain)
             }
-            .padding(10).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 9)).padding(16)
+            .padding(10)
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 9))
+            .padding(16)
             if items.isEmpty {
                 EmptyHint(icon: "clock", title: "没有记录", detail: query.isEmpty ? "完成翻译后会自动保存在这里" : "试试其他关键词")
             } else {
-                List(items) { item in
-                    HistoryRow(item: item)
-                        .contentShape(Rectangle())
-                        .onTapGesture { model.restore(item) }
-                        .contextMenu {
-                            Button("复制原文") { model.copy(item.sourceText) }
-                            Button(item.isFavorite ? "取消收藏" : "收藏") { model.toggleFavorite(item.id) }
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(items) { item in
+                            HistoryRow(
+                                item: item,
+                                onToggleFavorite: { model.toggleFavorite(item.id) }
+                            )
+                            .equatable()
+                            .contentShape(Rectangle())
+                            .onTapGesture { model.restore(item) }
+                            .contextMenu {
+                                Button("复制原文") { model.copy(item.sourceText) }
+                                Button(item.isFavorite ? "取消收藏" : "收藏") { model.toggleFavorite(item.id) }
+                            }
+                            Divider()
                         }
-                }.listStyle(.inset)
+                    }
+                    .padding(.horizontal, 8)
+                }
             }
         }
     }
 }
 
-private struct HistoryRow: View {
-    @EnvironmentObject private var model: AppModel
+private struct HistoryRow: View, Equatable {
     let item: HistoryItem
+    let onToggleFavorite: () -> Void
+
+    static func == (lhs: HistoryRow, rhs: HistoryRow) -> Bool {
+        lhs.item == rhs.item
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: item.mode.contains("OCR") ? "viewfinder" : "character.book.closed")
-                .frame(width: 28, height: 28).background(.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 7)).foregroundStyle(.blue)
+                .frame(width: 28, height: 28)
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+                .foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 5) {
                 Text(item.sourceText).lineLimit(2).font(.body)
                 if let result = item.outputs.first(where: { $0.error == nil }) {
                     Text(result.text).lineLimit(2).foregroundStyle(.secondary)
                 }
-                ViewThatFits(in: .horizontal) {
-                    HStack { historyMeta }
-                    VStack(alignment: .leading, spacing: 2) { historyMeta }
-                }
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+                HStack(spacing: 8) { historyMeta }
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
             Spacer()
-            Button { model.toggleFavorite(item.id) } label: {
+            Button(action: onToggleFavorite) {
                 Image(systemName: item.isFavorite ? "star.fill" : "star")
                     .foregroundStyle(item.isFavorite ? Color.yellow : Color.secondary.opacity(0.55))
             }.buttonStyle(.plain)
-        }.padding(.vertical, 7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 7)
     }
 
     @ViewBuilder private var historyMeta: some View {
         Text(item.mode)
         Text("\(item.sourceLanguage.rawValue) → \(item.targetLanguage.rawValue)")
-        Text(item.createdAt, style: .relative)
+        Text(item.createdAt, format: .dateTime.year().month().day().hour().minute())
     }
 }
 
@@ -649,9 +675,9 @@ private struct ServicesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Header(title: "服务", subtitle: "翻译功能的核心服务支持配置，开启的服务将被使用。") { EmptyView() }
+            Header(title: "服务", subtitle: "配置翻译、识别与语音服务。") { EmptyView() }
             Picker("服务类型", selection: $category) {
-                ForEach(ServiceCategory.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(ServiceCategory.allCases) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -680,30 +706,26 @@ private struct ServicesView: View {
             }
         }
         .onAppear { ensureSelection() }
-        .onChange(of: model.services) { ensureSelection(); model.saveServices() }
+        .onChange(of: model.services) { ensureSelection(); model.scheduleServicesSave() }
     }
 
     private var translationServices: some View {
         GeometryReader { geometry in
             let compact = geometry.size.width < 520
-            let horizontalInset: CGFloat = compact ? 10 : 18
-            let paneSpacing: CGFloat = compact ? 10 : 16
-            let availableWidth = geometry.size.width - horizontalInset * 2 - paneSpacing
+            let horizontalInset: CGFloat = compact ? 8 : 18
+            let availableWidth = geometry.size.width - horizontalInset * 2
 
-            HStack(spacing: paneSpacing) {
+            HStack(spacing: 16) {
                 serviceList
                     .frame(width: serviceListWidth(for: availableWidth))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(.separator.opacity(0.7))
-                    }
+                    .clashCard()
+                Divider()
                 serviceDetail
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clashCard()
             }
             .padding(.horizontal, horizontalInset)
-            .padding(.top, compact ? 10 : 14)
-            .padding(.bottom, compact ? 10 : 18)
+            .padding(.vertical, compact ? 10 : 16)
         }
     }
 
@@ -721,17 +743,16 @@ private struct ServicesView: View {
             .padding(.horizontal, 12)
             .frame(height: 36)
             Divider()
-            ScrollView {
-                LazyVStack(spacing: 3) {
-                    serviceRows
-                }
-                .padding(8)
+            List(selection: $selectedServiceID) {
+                serviceRows
             }
+            .listStyle(.inset)
+            .scrollContentBackground(.hidden)
             Divider()
             HStack(spacing: 0) {
                 Menu {
                     ForEach(ServiceKind.allCases.filter { $0 != .plugin }, id: \.self) { kind in
-                        Button(kind.rawValue) { selectedServiceID = model.addService(kind: kind) }
+                        Button(LocalizedStringKey(kind.rawValue)) { selectedServiceID = model.addService(kind: kind) }
                     }
                 } label: {
                     Label("添加", systemImage: "plus")
@@ -761,7 +782,7 @@ private struct ServicesView: View {
             .padding(.horizontal, 8)
             .frame(height: 44)
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(TransTheme.card)
     }
 
     private func serviceListWidth(for containerWidth: CGFloat) -> CGFloat {
@@ -771,8 +792,7 @@ private struct ServicesView: View {
     private var serviceRows: some View {
         ForEach($model.services) { $service in
             ServiceListRow(service: $service, selected: selectedServiceID == service.id)
-                .contentShape(Rectangle())
-                .onTapGesture { selectedServiceID = service.id }
+                .tag(service.id)
         }
     }
 
@@ -815,23 +835,26 @@ private struct ServiceListRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: serviceSymbol(service.kind))
-                .font(.body).foregroundStyle(.blue)
-                .frame(width: 30, height: 30)
-                .background(.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                .font(.body)
+                .foregroundStyle(selected ? Color.white.opacity(0.92) : Color.secondary)
+                .frame(width: 24)
             VStack(alignment: .leading, spacing: 3) {
                 Text(service.name)
                     .lineLimit(1)
                     .font(.subheadline.weight(.medium))
-                Text(serviceBadge(service.kind))
+                Text(LocalizedStringKey(serviceBadge(service.kind)))
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(service.kind == .appleLocal ? .green : .blue)
+                    .foregroundStyle(selected ? Color.white.opacity(0.82) : (service.kind == .appleLocal ? Color.green : Color.accentColor))
             }
             Spacer(minLength: 6)
             Toggle("启用", isOn: $service.enabled).labelsHidden().controlSize(.small)
         }
-        .padding(.horizontal, 10).padding(.vertical, 9)
+        .padding(.horizontal, 8).padding(.vertical, 7)
         .frame(maxWidth: .infinity)
-        .background(selected ? Color.accentColor.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 9))
+        // Let List provide the single system selection highlight. A second
+        // row background here creates the pale outer rectangle seen around
+        // selected services.
+        .listRowBackground(Color.clear)
     }
 }
 
@@ -842,39 +865,43 @@ private struct BuiltInServiceView: View {
     let details: String
 
     var body: some View {
-        GeometryReader { geometry in
-            if geometry.size.width >= 650 {
-                HSplitView { listPane.frame(minWidth: 250, idealWidth: 310); detailPane.frame(minWidth: 330) }
-            } else {
-                VStack(spacing: 0) { listPane.frame(height: 90); Divider(); detailPane }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(systemName: symbol)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 26)
+                    Text(title)
+                        .font(.title3.weight(.semibold))
+                    Spacer(minLength: 12)
+                    Text("内置")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.green.opacity(0.1), in: Capsule())
+                    Toggle("启用", isOn: .constant(true))
+                        .labelsHidden()
+                        .controlSize(.small)
+                }
+                Divider().padding(.top, 16)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(summary)
+                        .font(.body.weight(.medium))
+                    Text(details)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 18)
             }
+            .padding(22)
+            .frame(maxWidth: 760, alignment: .leading)
+            .clashCard()
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(18)
         }
-    }
-
-    private var listPane: some View {
-        VStack {
-            HStack(spacing: 10) {
-                Image(systemName: symbol).font(.title3).foregroundStyle(.blue).frame(width: 34, height: 34).background(.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-                Text(title).font(.headline)
-                Spacer()
-                Text("内置").font(.caption2.weight(.semibold)).foregroundStyle(.green).padding(.horizontal, 7).padding(.vertical, 3).background(.green.opacity(0.1), in: Capsule())
-                Toggle("启用", isOn: .constant(true)).labelsHidden().controlSize(.small)
-            }
-            .padding(12)
-            Spacer()
-        }
-        .background(Color(nsColor: .controlBackgroundColor))
-    }
-
-    private var detailPane: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Label(title, systemImage: symbol).font(.title2.bold())
-            Text(summary).font(.headline)
-            Text(details).foregroundStyle(.secondary)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(28)
+        .background(TransTheme.canvas)
     }
 }
 
@@ -936,15 +963,18 @@ private struct ServiceEditor: View {
                 VStack(alignment: .leading, spacing: 8) { validationStatus; serviceFooterText; HStack { validateButton; removeButton } }
             }.padding(12)
         }
-        .background(.background, in: RoundedRectangle(cornerRadius: 13))
-        .overlay(RoundedRectangle(cornerRadius: 13).stroke(.separator.opacity(0.7)))
+        .padding(.vertical, 8)
+        .clashCard()
     }
     private var serviceIdentity: some View {
         HStack(spacing: 12) {
-            Image(systemName: icon).font(.title3).frame(width: 38, height: 38).background(.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 9)).foregroundStyle(.blue)
+            Image(systemName: icon)
+                .font(.title3)
+                .frame(width: 24)
+                .foregroundStyle(.secondary)
             VStack(alignment: .leading) {
                 TextField("服务名称", text: $service.name).font(.headline).textFieldStyle(.plain)
-                Text(service.kind.rawValue).font(.caption).foregroundStyle(.secondary)
+                Text(LocalizedStringKey(service.kind.rawValue)).font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -1079,39 +1109,175 @@ private struct ServiceEditor: View {
 
 private struct PluginsView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var expandedConfigurations: Set<String> = []
+    @State private var expandedGuides: Set<String> = []
+
     var body: some View {
         VStack(spacing: 0) {
-            Header(title: "插件", subtitle: "使用 JavaScript 扩展翻译服务") {
-                Button(action: model.installPlugin) { Label("安装插件", systemImage: "plus") }.buttonStyle(.borderedProminent)
+            Header(title: "插件", subtitle: "兼容 Trans 文本翻译插件，并提供可直接使用的内置工具") {
+                Button(action: model.installPlugin) {
+                    Label("导入插件", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.borderedProminent)
             }
             Divider()
             if model.plugins.isEmpty {
-                EmptyHint(icon: "puzzlepiece.extension", title: "尚未安装插件", detail: "插件目录需要包含 manifest.json 和实现 translate(request) 的 main.js")
+                EmptyHint(
+                    icon: "puzzlepiece.extension",
+                    title: "尚未安装插件",
+                    detail: "可导入 .zip、.zip，或选择包含 manifest.json 与 main.js 的目录"
+                )
             } else {
-                List {
-                    ForEach($model.plugins) { $plugin in
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 12) {
-                                pluginIdentity(plugin)
-                                Spacer(minLength: 8)
-                                pluginActions($plugin)
-                            }
-                            VStack(alignment: .leading, spacing: 10) {
-                                pluginIdentity(plugin)
-                                HStack { Spacer(minLength: 0); pluginActions($plugin) }
-                            }
-                        }.padding(.vertical, 8)
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach($model.plugins) { $plugin in
+                            pluginCard($plugin)
+                        }
                     }
-                }.onChange(of: model.plugins) { model.savePlugins() }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 18)
+                    .frame(maxWidth: 980)
+                    .frame(maxWidth: .infinity)
+                }
+                .onChange(of: model.plugins) { model.schedulePluginsSave() }
+                .safeAreaInset(edge: .bottom) {
+                    Text("第三方插件会执行 JavaScript 并可访问网络，请只导入可信来源的插件。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(.bar)
+                }
             }
+        }
+    }
+
+    private func pluginCard(_ plugin: Binding<InstalledPlugin>) -> some View {
+        let id = plugin.wrappedValue.id
+        let configurationIsExpanded = expandedConfigurations.contains(id)
+        let guideIsExpanded = expandedGuides.contains(id)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 14) {
+                    pluginIdentity(plugin.wrappedValue)
+                    Spacer(minLength: 12)
+                    pluginActions(plugin)
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    pluginIdentity(plugin.wrappedValue)
+                    HStack { Spacer(minLength: 0); pluginActions(plugin) }
+                }
+            }
+
+            HStack(spacing: 8) {
+                if !plugin.wrappedValue.options.isEmpty {
+                    pluginDetailButton(
+                        title: "插件配置",
+                        systemImage: "slider.horizontal.3",
+                        isExpanded: configurationIsExpanded
+                    ) {
+                        toggle(&expandedConfigurations, id: id)
+                    }
+                }
+                if plugin.wrappedValue.source == .builtIn {
+                    pluginDetailButton(
+                        title: "使用说明",
+                        systemImage: "book.pages",
+                        isExpanded: guideIsExpanded
+                    ) {
+                        toggle(&expandedGuides, id: id)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 14)
+
+            if configurationIsExpanded {
+                Divider().padding(.top, 14)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("插件配置")
+                        .font(.subheadline.weight(.semibold))
+                    ForEach(plugin.wrappedValue.options) { option in
+                        optionEditor(plugin: plugin, option: option)
+                    }
+                }
+                .padding(.top, 14)
+            }
+
+            if guideIsExpanded {
+                Divider().padding(.top, 14)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("使用说明")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.bottom, 10)
+                    pluginGuide(plugin.wrappedValue)
+                }
+                .padding(.top, 14)
+            }
+
+            if !plugin.wrappedValue.category.isSupported {
+                Label(
+                    "已导入，但 Trans 当前尚未接入 Trans \(plugin.wrappedValue.category.displayName) 插件",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .padding(.top, 14)
+            }
+        }
+        .padding(16)
+        .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 3)
+    }
+
+    private func pluginDetailButton(
+        title: String,
+        systemImage: String,
+        isExpanded: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(isExpanded ? Color.white : Color.accentColor)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    isExpanded ? Color.accentColor : Color.accentColor.opacity(0.1),
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(.plain)
+        .help(isExpanded ? "收起\(title)" : "查看\(title)")
+    }
+
+    private func toggle(_ set: inout Set<String>, id: String) {
+        if set.contains(id) {
+            set.remove(id)
+        } else {
+            set.insert(id)
         }
     }
 
     private func pluginIdentity(_ plugin: InstalledPlugin) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: "puzzlepiece.extension.fill").font(.title2).foregroundStyle(.purple).frame(width: 42, height: 42).background(.purple.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+            Image(systemName: "puzzlepiece.extension.fill")
+                .font(.title2)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 42, height: 42)
+                .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 3) {
-                HStack { Text(plugin.name).font(.headline); Text("v\(plugin.version)").font(.caption).foregroundStyle(.secondary) }
+                HStack(spacing: 7) {
+                    Text(plugin.name).font(.headline)
+                    Text("v\(plugin.version)").font(.caption).foregroundStyle(.secondary)
+                    pluginBadge(plugin.source.displayName, color: plugin.source == .builtIn ? .green : .blue)
+                    pluginBadge(plugin.category.displayName, color: plugin.category.isSupported ? .purple : .orange)
+                }
                 if let summary = plugin.summary { Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
                 if let author = plugin.author { Text(author).font(.caption2).foregroundStyle(.tertiary) }
             }
@@ -1120,8 +1286,140 @@ private struct PluginsView: View {
 
     private func pluginActions(_ plugin: Binding<InstalledPlugin>) -> some View {
         HStack(spacing: 12) {
-            Toggle("启用", isOn: plugin.enabled).labelsHidden()
-            Button("卸载", role: .destructive) { model.uninstallPlugin(plugin.wrappedValue) }
+            Toggle("启用", isOn: plugin.enabled)
+                .labelsHidden()
+                .disabled(!plugin.wrappedValue.category.isSupported)
+                .help(plugin.wrappedValue.enabled ? "关闭插件" : "开启插件")
+            Menu {
+                if plugin.wrappedValue.homepage != nil {
+                    Button("打开插件主页") { model.openPluginHomepage(plugin.wrappedValue) }
+                }
+                if !plugin.wrappedValue.options.isEmpty {
+                    Button("重置配置") { model.resetPluginConfiguration(plugin.wrappedValue) }
+                }
+                if plugin.wrappedValue.source != .builtIn {
+                    Divider()
+                    Button("卸载", role: .destructive) { model.uninstallPlugin(plugin.wrappedValue) }
+                } else {
+                    Divider()
+                    Text("内置插件不可卸载")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+    }
+
+    private func optionEditor(plugin: Binding<InstalledPlugin>, option: PluginOption) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(option.title).font(.caption.weight(.medium))
+            if option.type == "menu", let values = option.menuValues, !values.isEmpty {
+                Picker(option.title, selection: optionBinding(plugin: plugin, option: option)) {
+                    ForEach(values) { value in Text(value.title).tag(value.value) }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 360, alignment: .leading)
+            } else if option.isSecure {
+                SecureField(
+                    option.textConfig?.placeholderText ?? option.title,
+                    text: optionBinding(plugin: plugin, option: option)
+                )
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 520)
+            } else if (option.textConfig?.height ?? 0) > 40 {
+                TextEditor(text: optionBinding(plugin: plugin, option: option))
+                    .font(.body)
+                    .frame(minHeight: option.textConfig?.height ?? 64, maxHeight: 120)
+                    .padding(5)
+                    .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 7))
+            } else {
+                TextField(
+                    option.textConfig?.placeholderText ?? option.title,
+                    text: optionBinding(plugin: plugin, option: option)
+                )
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 520)
+            }
+            if let description = option.desc, !description.isEmpty {
+                Text(description).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func optionBinding(
+        plugin: Binding<InstalledPlugin>,
+        option: PluginOption
+    ) -> Binding<String> {
+        Binding(
+            get: { plugin.wrappedValue.optionValues[option.identifier] ?? option.defaultValue ?? "" },
+            set: { plugin.wrappedValue.optionValues[option.identifier] = $0 }
+        )
+    }
+
+    private func pluginBadge(_ title: String, color: Color) -> some View {
+        Text(title)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.1), in: Capsule())
+    }
+
+    @ViewBuilder
+    private func pluginGuide(_ plugin: InstalledPlugin) -> some View {
+        switch plugin.identifier {
+        case "com.trans.builtin.chinese-tools":
+            guideBlock(
+                title: "把中文转换成另一种形式",
+                steps: [
+                    "开启插件后，在“插件配置”中选择简体转繁体、繁体转简体，或带/不带声调拼音。",
+                    "在翻译输入框、划词翻译或 OCR 结果中使用，输出会和其他已开启服务并列显示。"
+                ],
+                effect: "例如：繁體中文 → 繁体中文；你好 → nǐ hǎo（带声调拼音）。"
+            )
+        case "com.trans.builtin.text-tools":
+            guideBlock(
+                title: "对选中文本做快速格式处理",
+                steps: [
+                    "在“插件配置”中选择清理空白、格式化 JSON、URL 编解码、大小写或代码命名转换。",
+                    "把要处理的文本放入输入翻译框，或使用划词翻译；它不会访问网络。"
+                ],
+                effect: "例如：helloWorld → hello_world；多余空格和连续空行会被清理。"
+            )
+        case "com.trans.builtin.ai-writer":
+            guideBlock(
+                title: "用 OpenAI 兼容模型处理文本",
+                steps: [
+                    "填写接口地址、API Key 和模型；兼容 OpenAI Chat Completions 的服务通常可以直接使用。",
+                    "选择翻译、润色、语法纠错、解释或自定义指令，然后开启插件。",
+                    "API Key 只保存在 macOS 钥匙串；请求会发送到你填写的接口地址。"
+                ],
+                effect: "适合论文润色、邮件改写、语法修正和按自定义规则翻译。"
+            )
+        default:
+            Text(plugin.summary ?? "开启后会参与文本翻译，并在结果列表中显示输出。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func guideBlock(title: String, steps: [String], effect: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.caption.weight(.semibold))
+            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                Label(step, systemImage: "(index + 1).circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Label {
+                Text(effect)
+            } icon: {
+                Image(systemName: "sparkles")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 }
@@ -1133,6 +1431,21 @@ private struct SettingsView: View {
             Header(title: "设置", subtitle: "调整 Trans 的工作方式") { EmptyView() }
             Divider()
             Form {
+                Section("外观与语言") {
+                    Picker("界面语言", selection: $model.settings.interfaceLanguage) {
+                        ForEach(InterfaceLanguage.allCases) { language in
+                            Text(LocalizedStringKey(language.rawValue)).tag(language.rawValue)
+                        }
+                    }
+                    Picker("外观", selection: Binding(
+                        get: { model.settings.colorScheme },
+                        set: { model.setColorScheme($0) }
+                    )) {
+                        ForEach(ColorSchemePreference.allCases) { preference in
+                            Text(LocalizedStringKey(preference.rawValue)).tag(preference.rawValue)
+                        }
+                    }
+                }
                 Section("翻译与识别") {
                     Toggle("OCR 后自动复制文本", isOn: $model.settings.copyAfterOCR)
                     Toggle("OCR 后自动翻译", isOn: $model.settings.autoTranslate)
@@ -1182,7 +1495,7 @@ private struct SettingsView: View {
             .formStyle(.grouped)
             .frame(maxWidth: 700)
             .onChange(of: model.settings) { _, value in
-                model.saveSettings()
+                model.scheduleSettingsSave()
                 NSApp.windows
                     .filter { !($0 is NSPanel) }
                     .forEach { $0.level = value.keepOnTop ? .floating : .normal }
@@ -1218,13 +1531,16 @@ private struct Header<Actions: View>: View {
                 titleBlock
                 HStack { actions }
             }
-        }.padding(.horizontal, 22).padding(.vertical, 15)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 17)
+        .background(TransTheme.header)
     }
 
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.title2.bold())
-            Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            Text(title).font(.title2.weight(.semibold))
+            Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
         }
     }
 }
@@ -1239,5 +1555,24 @@ private struct EmptyHint: View {
             Text(title).font(.headline)
             Text(detail).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(34)
+    }
+}
+
+private enum TransTheme {
+    static let accent = Color(red: 0.12, green: 0.52, blue: 1.0)
+    static let canvas = Color(nsColor: .windowBackgroundColor)
+    static let sidebar = Color(nsColor: .windowBackgroundColor)
+    static let header = Color(nsColor: .controlBackgroundColor)
+    static let card = Color(nsColor: .controlBackgroundColor)
+    static let border = Color(nsColor: .separatorColor).opacity(0.45)
+}
+
+private extension View {
+    func clashCard() -> some View {
+        background(TransTheme.card, in: RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(TransTheme.border)
+            }
     }
 }

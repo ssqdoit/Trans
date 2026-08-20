@@ -8,13 +8,14 @@ struct TransApp: App {
         WindowGroup("Trans") {
             ContentView()
                 .environmentObject(model)
+                .environmentObject(model.navigation)
                 .frame(minWidth: 450, minHeight: 310)
         }
         .defaultSize(width: 1080, height: 720)
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(after: .newItem) {
-                Button("输入翻译") { model.selectedSection = .translate }
+                Button("输入翻译") { model.navigation.selectedSection = .translate }
                     .keyboardShortcut("a", modifiers: [.option])
                 Button("截图 OCR") { Task { await model.screenshotAndRecognize() } }
                     .keyboardShortcut("d", modifiers: [.option])
@@ -31,7 +32,7 @@ struct TransApp: App {
         // equivalents shown here never double-fire.
         MenuBarExtra {
             Button("输入翻译") {
-                model.selectedSection = .translate
+                model.navigation.selectedSection = .translate
                 NSApp.activate(ignoringOtherApps: true)
             }
             .menuShortcut(model.settings.inputHotKey)

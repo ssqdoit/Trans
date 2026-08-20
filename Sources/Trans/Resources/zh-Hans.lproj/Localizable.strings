@@ -1,0 +1,10 @@
+/* Simplified Chinese is the source language; this catalog documents the
+   supported locale and keeps localization behavior explicit. */
+"翻译" = "翻译";
+"历史" = "历史";
+"服务" = "服务";
+"插件" = "插件";
+"设置" = "设置";
+"外观与语言" = "外观与语言";
+"界面语言" = "界面语言";
+"外观" = "外观";

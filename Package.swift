@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Trans",
+    defaultLocalization: "zh-Hans",
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "Trans", targets: ["Trans"])
@@ -11,6 +12,7 @@ let package = Package(
         .executableTarget(
             name: "Trans",
             path: "Sources/Trans",
+            resources: [.process("Resources")],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("AVFoundation"),

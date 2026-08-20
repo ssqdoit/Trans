@@ -249,4 +249,22 @@ final class AppSettingsDecodingTests: XCTestCase {
         let settings = try JSONDecoder().decode(AppSettings.self, from: Data("{}".utf8))
         XCTAssertEqual(settings, AppSettings())
     }
+
+    func testInterfaceLanguageLocalesAreStableForRuntimeSwitching() {
+        XCTAssertEqual(InterfaceLanguage.english.locale.identifier, "en")
+        XCTAssertEqual(InterfaceLanguage.simplifiedChinese.locale.identifier, "zh-Hans")
+        XCTAssertEqual(InterfaceLanguage.system.locale, Locale.current)
+    }
+
+    func testColorSchemePreferencesMapToAppKitAppearances() {
+        XCTAssertNil(ColorSchemePreference.system.nsAppearance)
+        XCTAssertEqual(ColorSchemePreference.light.nsAppearance?.name, .aqua)
+        XCTAssertEqual(ColorSchemePreference.dark.nsAppearance?.name, .darkAqua)
+    }
+
+    func testBundledBrandIconLoadsInsteadOfApplicationFallback() {
+        XCTAssertEqual(TransBrand.icon.accessibilityDescription, "Trans")
+        XCTAssertGreaterThan(TransBrand.icon.size.width, 0)
+        XCTAssertGreaterThan(TransBrand.icon.size.height, 0)
+    }
 }
