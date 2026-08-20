@@ -1,5 +1,12 @@
+import SwiftUI
 import XCTest
 @testable import Trans
+
+final class ScreenshotSelectionPolicyTests: XCTestCase {
+    func testWaitsForOptionReleaseBeforeStartingSelection() {
+        XCTAssertTrue(ScreenshotSelectionPolicy.shouldWaitForModifierRelease([.option]))
+    }
+}
 
 final class SelectionGesturePolicyTests: XCTestCase {
     func testDoubleClickIsSelectionGesture() {
@@ -29,34 +36,48 @@ final class SelectionGesturePolicyTests: XCTestCase {
 final class SelectionPresentationPolicyTests: XCTestCase {
     func testPresentsFreshText() {
         XCTAssertTrue(SelectionPresentationPolicy.shouldPresent(
-            text: "hello", lastShownText: nil, isPopupVisible: false
+            text: "hello", lastShownText: nil, dismissedText: nil, isPopupVisible: false
         ))
     }
 
     func testSkipsSameTextWhilePopupStillVisible() {
         XCTAssertFalse(SelectionPresentationPolicy.shouldPresent(
-            text: "hello", lastShownText: "hello", isPopupVisible: true
+            text: "hello", lastShownText: "hello", dismissedText: nil, isPopupVisible: true
         ))
     }
 
     func testPresentsSameTextAgainAfterPopupDismissed() {
         XCTAssertTrue(SelectionPresentationPolicy.shouldPresent(
-            text: "hello", lastShownText: "hello", isPopupVisible: false
+            text: "hello", lastShownText: "hello", dismissedText: nil, isPopupVisible: false
         ))
     }
 
     func testPresentsDifferentTextWhilePopupVisible() {
         XCTAssertTrue(SelectionPresentationPolicy.shouldPresent(
-            text: "world", lastShownText: "hello", isPopupVisible: true
+            text: "world", lastShownText: "hello", dismissedText: nil, isPopupVisible: true
         ))
     }
 
     func testSkipsNilAndWhitespaceOnlyText() {
         XCTAssertFalse(SelectionPresentationPolicy.shouldPresent(
-            text: nil, lastShownText: nil, isPopupVisible: false
+            text: nil, lastShownText: nil, dismissedText: nil, isPopupVisible: false
         ))
         XCTAssertFalse(SelectionPresentationPolicy.shouldPresent(
-            text: "  \n\t", lastShownText: nil, isPopupVisible: false
+            text: "  \n\t", lastShownText: nil, dismissedText: nil, isPopupVisible: false
+        ))
+    }
+
+    func testSkipsExplicitlyClosedTextWhileStillSelected() {
+        // 用户点关闭后，源应用里的旧选区在后续拖拽手势中仍会被读到，
+        // 不应让小窗自动重现。
+        XCTAssertFalse(SelectionPresentationPolicy.shouldPresent(
+            text: "hello", lastShownText: "hello", dismissedText: "hello", isPopupVisible: false
+        ))
+    }
+
+    func testPresentsNewSelectionAfterExplicitClose() {
+        XCTAssertTrue(SelectionPresentationPolicy.shouldPresent(
+            text: "world", lastShownText: "hello", dismissedText: "hello", isPopupVisible: false
         ))
     }
 }
@@ -86,6 +107,45 @@ final class PopupPlacementTests: XCTestCase {
         XCTAssertLessThanOrEqual(origin.y + size.height, screen.maxY - 8)
         XCTAssertGreaterThanOrEqual(origin.y, screen.minY + 8)
     }
+
+    func testAnchoredResizeKeepsTopLeftCorner() {
+        let current = CGRect(x: 400, y: 300, width: 320, height: 200)
+        let origin = PopupPlacement.anchoredOrigin(
+            currentFrame: current,
+            newSize: CGSize(width: 320, height: 260),
+            screen: screen
+        )
+        XCTAssertEqual(origin.x, 400)
+        XCTAssertEqual(origin.y, current.maxY - 260) // 顶边不动，向下生长
+    }
+
+    func testAnchoredResizeClampsInsideScreen() {
+        let current = CGRect(x: 1300, y: 10, width: 320, height: 200)
+        let origin = PopupPlacement.anchoredOrigin(
+            currentFrame: current,
+            newSize: CGSize(width: 320, height: 400),
+            screen: screen
+        )
+        XCTAssertLessThanOrEqual(origin.x + 320, screen.maxX - 8)
+        XCTAssertGreaterThanOrEqual(origin.y, screen.minY + 8)
+    }
+}
+
+final class MenuShortcutParserTests: XCTestCase {
+    func testParsesOptionLetterShortcut() {
+        let shortcut = MenuShortcutParser.shortcut(from: "⌥S")
+        XCTAssertEqual(shortcut, KeyboardShortcut("s", modifiers: .option))
+    }
+
+    func testParsesMultipleModifiers() {
+        let shortcut = MenuShortcutParser.shortcut(from: "⌃⇧⌘D")
+        XCTAssertEqual(shortcut, KeyboardShortcut("d", modifiers: [.control, .shift, .command]))
+    }
+
+    func testReturnsNilForModifierOnlyOrEmptyString() {
+        XCTAssertNil(MenuShortcutParser.shortcut(from: ""))
+        XCTAssertNil(MenuShortcutParser.shortcut(from: "⌥"))
+    }
 }
 
 final class HotKeyRegistrationReportTests: XCTestCase {
@@ -106,6 +166,11 @@ final class OCRPresentationPolicyTests: XCTestCase {
     func testScreenshotTranslationAlwaysUsesPopup() {
         XCTAssertTrue(OCRPresentationPolicy.shouldShowPopup(trigger: .screenshotTranslation, isAppActive: true))
         XCTAssertTrue(OCRPresentationPolicy.shouldShowPopup(trigger: .screenshotTranslation, isAppActive: false))
+    }
+
+    func testScreenshotRecognitionUsesPopupOnlyWhenAppInBackground() {
+        XCTAssertTrue(OCRPresentationPolicy.shouldShowPopup(trigger: .screenshotRecognition, isAppActive: false))
+        XCTAssertFalse(OCRPresentationPolicy.shouldShowPopup(trigger: .screenshotRecognition, isAppActive: true))
     }
 
     func testSilentScreenshotAlwaysShowsPopup() {

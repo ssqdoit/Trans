@@ -11,6 +11,12 @@ enum SelectionCapturePolicy {
     }
 }
 
+enum ScreenshotSelectionPolicy {
+    static func shouldWaitForModifierRelease(_ flags: NSEvent.ModifierFlags) -> Bool {
+        flags.contains(.option)
+    }
+}
+
 @MainActor
 final class CaptureService {
     func chooseImages() -> [NSImage] {
@@ -27,6 +33,10 @@ final class CaptureService {
     }
 
     func interactiveScreenshot() async throws -> NSImage {
+        while ScreenshotSelectionPolicy.shouldWaitForModifierRelease(NSEvent.modifierFlags) {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("trans-capture-\(UUID().uuidString).png")
         let path = url.path
         return try await withCheckedThrowingContinuation { continuation in
@@ -65,8 +75,8 @@ final class CaptureService {
         down?.post(tap: .cghidEventTap)
         up?.post(tap: .cghidEventTap)
         var text: String?
-        for _ in 0..<10 {
-            try await Task.sleep(nanoseconds: 100_000_000)
+        for _ in 0..<5 {
+            try await Task.sleep(nanoseconds: 40_000_000)
             if pasteboard.changeCount != before {
                 text = pasteboard.string(forType: .string)
                 break

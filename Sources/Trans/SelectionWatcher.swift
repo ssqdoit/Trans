@@ -58,12 +58,14 @@ final class SelectionWatcher {
     private func handleMouseUp(clickCount: Int, location: CGPoint) {
         let distance = hypot(location.x - mouseDownLocation.x, location.y - mouseDownLocation.y)
         guard SelectionGesturePolicy.isSelectionGesture(clickCount: clickCount, dragDistance: distance) else { return }
+        guard AXIsProcessTrusted() else { return }
         readTask?.cancel()
         readTask = Task { [weak self] in
             // Give the frontmost app a beat to commit its selection state.
             try? await Task.sleep(nanoseconds: 150_000_000)
-            guard let self, !Task.isCancelled, AXIsProcessTrusted() else { return }
+            guard let self, !Task.isCancelled else { return }
             guard let text = AXSelectionReader.selectedText() else { return }
+            guard !Task.isCancelled else { return }
             self.onSelection?(text, location)
         }
     }

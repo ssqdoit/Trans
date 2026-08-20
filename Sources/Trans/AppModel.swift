@@ -191,12 +191,15 @@ final class AppModel: ObservableObject {
 
     func screenshotAndRecognize(silent: Bool = false) async {
         do {
+            let isAppActive = NSApp.isActive
             let image = try await captureService.interactiveScreenshot()
-            if silent, OCRPresentationPolicy.shouldShowPopup(trigger: .silentScreenshot, isAppActive: NSApp.isActive) {
-                let outcome = await recognize(image: image, mode: "静默截图 OCR", shouldTranslate: false)
-                await presentOCRPopup(outcome: outcome, historyMode: "静默截图 OCR")
+            let mode = silent ? "静默截图 OCR" : "截图 OCR"
+            let trigger: OCRPopupTrigger = silent ? .silentScreenshot : .screenshotRecognition
+            if OCRPresentationPolicy.shouldShowPopup(trigger: trigger, isAppActive: isAppActive) {
+                let outcome = await recognize(image: image, mode: mode, shouldTranslate: false)
+                await presentOCRPopup(outcome: outcome, historyMode: mode)
             } else {
-                _ = await recognize(image: image, mode: silent ? "静默截图 OCR" : "截图 OCR")
+                _ = await recognize(image: image, mode: mode)
                 if !silent { selectedSection = .ocr; activate() }
             }
         } catch { show(error.localizedDescription) }
@@ -458,9 +461,14 @@ final class AppModel: ObservableObject {
         selectionPopup.onOpenInMainWindow = { [weak self] in
             guard let self else { return }
             let text = selectionPopup.state.sourceText
-            if !text.isEmpty { sourceText = text }
-            if !selectionPopup.state.outputs.isEmpty { outputs = selectionPopup.state.outputs }
-            selectedSection = .translate
+            if selectionPopup.state.kind == .ocr {
+                if !text.isEmpty { ocrText = text }
+                selectedSection = .ocr
+            } else {
+                if !text.isEmpty { sourceText = text }
+                if !selectionPopup.state.outputs.isEmpty { outputs = selectionPopup.state.outputs }
+                selectedSection = .translate
+            }
             activate()
         }
         selectionPopup.onRetranslate = { [weak self] _ in
@@ -497,18 +505,24 @@ final class AppModel: ObservableObject {
     private func presentPopup(
         text: String,
         title: String = "划词翻译",
+        kind: SelectionPopupKind = .translation,
         historyMode: String = "划词翻译",
         at location: CGPoint,
         force: Bool = false
     ) async {
+        // Compare against the session's original selection text, not the
+        // (possibly edited) popup text, so re-reading the same AX selection
+        // never resets an in-popup edit.
         guard force || SelectionPresentationPolicy.shouldPresent(
             text: text,
-            lastShownText: selectionPopup.lastShownText,
+            lastShownText: selectionPopup.sessionSelectionText,
+            dismissedText: selectionPopup.dismissedText,
             isPopupVisible: selectionPopup.isVisible
         ) else { return }
         let sessionID = selectionPopup.show(
             text: text,
             title: title,
+            kind: kind,
             source: sourceLanguage,
             target: targetLanguage,
             at: location
@@ -555,15 +569,23 @@ final class AppModel: ObservableObject {
     private func presentOCRPopup(outcome: OCRRecognitionOutcome, historyMode: String) async {
         switch OCRPopupResultPolicy.presentation(for: outcome) {
         case .translate(let text):
+            let isOCR = historyMode != "截图翻译"
             await presentPopup(
                 text: text,
-                title: "OCR 翻译",
+                title: isOCR ? historyMode : "截图翻译",
+                kind: isOCR ? .ocr : .translation,
                 historyMode: historyMode,
                 at: NSEvent.mouseLocation,
                 force: true
             )
         case .message(let message):
-            selectionPopup.showMessage(message, title: "OCR 翻译", at: NSEvent.mouseLocation)
+            let isOCR = historyMode != "截图翻译"
+            selectionPopup.showMessage(
+                message,
+                title: isOCR ? historyMode : "截图翻译",
+                kind: isOCR ? .ocr : .translation,
+                at: NSEvent.mouseLocation
+            )
         case .none:
             break
         }
@@ -610,11 +632,10 @@ final class AppModel: ObservableObject {
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == ownPID,
               let target = lastExternalApp, !target.isTerminated else { return }
         target.activate()
-        for _ in 0..<12 {
+        for _ in 0..<4 {
             if NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier { break }
-            try? await Task.sleep(nanoseconds: 50_000_000)
+            try? await Task.sleep(nanoseconds: 25_000_000)
         }
-        try? await Task.sleep(nanoseconds: 80_000_000)
     }
 
     private func appendHistory(_ item: HistoryItem) {
@@ -631,5 +652,12 @@ final class AppModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 2_200_000_000)
             if statusMessage == text { statusMessage = nil }
         }
+    }
+
+    deinit {
+        if let workspaceObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver)
+        }
+        clipboardTimer?.invalidate()
     }
 }

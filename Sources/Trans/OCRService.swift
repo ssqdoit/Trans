@@ -37,8 +37,10 @@ final class OCRService {
             if !requested.isEmpty { request.recognitionLanguages = requested }
             request.revision = VNRecognizeTextRequestRevision3
             DispatchQueue.global(qos: .userInitiated).async {
-                do { try VNImageRequestHandler(cgImage: cgImage).perform([request]) }
-                catch { continuation.resume(throwing: error) }
+                autoreleasepool {
+                    do { try VNImageRequestHandler(cgImage: cgImage).perform([request]) }
+                    catch { continuation.resume(throwing: error) }
+                }
             }
         }
     }

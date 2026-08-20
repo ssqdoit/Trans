@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import SwiftUI
 
 enum SelectionGesturePolicy {
     static let dragThreshold: CGFloat = 8
@@ -10,9 +11,19 @@ enum SelectionGesturePolicy {
 }
 
 enum SelectionPresentationPolicy {
-    static func shouldPresent(text: String?, lastShownText: String?, isPopupVisible: Bool) -> Bool {
+    static func shouldPresent(
+        text: String?,
+        lastShownText: String?,
+        dismissedText: String?,
+        isPopupVisible: Bool
+    ) -> Bool {
         guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        return !(isPopupVisible && text == lastShownText)
+        if isPopupVisible, text == lastShownText { return false }
+        // A selection lingering in the source app keeps producing the same
+        // text on later drag gestures; don't resurrect an explicitly closed
+        // popup until the user selects something else.
+        if !isPopupVisible, text == dismissedText { return false }
+        return true
     }
 }
 
@@ -35,6 +46,44 @@ enum PopupPlacement {
         y = max(y, screen.minY + margin)
         return CGPoint(x: x, y: y)
     }
+
+    /// Resizes an already-visible (possibly user-moved) panel in place: the
+    /// top-left corner stays fixed and the panel grows downward.
+    static func anchoredOrigin(
+        currentFrame: CGRect,
+        newSize: CGSize,
+        screen: CGRect,
+        margin: CGFloat = 8
+    ) -> CGPoint {
+        var x = currentFrame.minX
+        var y = currentFrame.maxY - newSize.height
+        x = min(x, screen.maxX - margin - newSize.width)
+        x = max(x, screen.minX + margin)
+        y = min(y, screen.maxY - margin - newSize.height)
+        y = max(y, screen.minY + margin)
+        return CGPoint(x: x, y: y)
+    }
+}
+
+/// Parses a settings shortcut label like "⌥S" into a SwiftUI shortcut so
+/// menu-bar items can display it natively. The Carbon hot key swallows the
+/// key event system-wide, so the menu equivalent is display-only.
+enum MenuShortcutParser {
+    static func shortcut(from label: String) -> KeyboardShortcut? {
+        var modifiers: EventModifiers = []
+        var key: Character?
+        for character in label {
+            switch character {
+            case "⌘": modifiers.insert(.command)
+            case "⌥": modifiers.insert(.option)
+            case "⇧": modifiers.insert(.shift)
+            case "⌃": modifiers.insert(.control)
+            default: key = character
+            }
+        }
+        guard let key, let lowered = key.lowercased().first else { return nil }
+        return KeyboardShortcut(KeyEquivalent(lowered), modifiers: modifiers)
+    }
 }
 
 enum HotKeyRegistrationReport {
@@ -46,6 +95,7 @@ enum HotKeyRegistrationReport {
 
 enum OCRPopupTrigger {
     case screenshotTranslation
+    case screenshotRecognition
     case silentScreenshot
     case clipboard
     case continuous
@@ -57,6 +107,7 @@ enum OCRPresentationPolicy {
     static func shouldShowPopup(trigger: OCRPopupTrigger, isAppActive: Bool) -> Bool {
         switch trigger {
         case .screenshotTranslation: return true
+        case .screenshotRecognition: return !isAppActive
         case .silentScreenshot: return true
         case .clipboard, .continuous: return !isAppActive
         }

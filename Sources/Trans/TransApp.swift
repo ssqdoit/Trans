@@ -25,28 +25,27 @@ struct TransApp: App {
             }
         }
 
+        // MenuBarExtra bridges to NSMenu, which drops custom label layouts;
+        // shortcuts must go through keyboardShortcut to be displayed. The
+        // Carbon hot keys consume these key events system-wide, so the menu
+        // equivalents shown here never double-fire.
         MenuBarExtra {
-            Button {
+            Button("输入翻译") {
                 model.selectedSection = .translate
                 NSApp.activate(ignoringOtherApps: true)
-            } label: {
-                MenuActionLabel("输入翻译", shortcut: model.settings.inputHotKey)
             }
-            Button { Task { await model.translateSelectionPopup() } } label: {
-                MenuActionLabel("划词翻译", shortcut: model.settings.selectionHotKey)
-            }
+            .menuShortcut(model.settings.inputHotKey)
+            Button("划词翻译") { Task { await model.translateSelectionPopup() } }
+                .menuShortcut(model.settings.selectionHotKey)
             Button("静默划词翻译") { Task { await model.translateSelection(silent: true) } }
-            Button { Task { await model.translateInputBox() } } label: {
-                MenuActionLabel("输入框翻译", shortcut: model.settings.inputBoxHotKey)
-            }
+            Button("输入框翻译") { Task { await model.translateInputBox() } }
+                .menuShortcut(model.settings.inputBoxHotKey)
             Divider()
             Button("截图翻译") { Task { await model.screenshotAndTranslate() } }
-            Button { Task { await model.screenshotAndRecognize() } } label: {
-                MenuActionLabel("截图 OCR", shortcut: model.settings.screenshotHotKey)
-            }
-            Button { Task { await model.screenshotAndRecognize(silent: true) } } label: {
-                MenuActionLabel("静默截图 OCR", shortcut: model.settings.ocrHotKey)
-            }
+            Button("截图 OCR") { Task { await model.screenshotAndRecognize() } }
+                .menuShortcut(model.settings.screenshotHotKey)
+            Button("静默截图 OCR") { Task { await model.screenshotAndRecognize(silent: true) } }
+                .menuShortcut(model.settings.ocrHotKey)
             Divider()
             Button("退出 Trans") { NSApp.terminate(nil) }
         } label: {
@@ -56,24 +55,13 @@ struct TransApp: App {
     }
 }
 
-private struct MenuActionLabel: View {
-    private let title: String
-    private let shortcut: String
-
-    init(_ title: String, shortcut: String) {
-        self.title = title
-        self.shortcut = shortcut
-    }
-
-    var body: some View {
-        HStack(spacing: 24) {
-            Text(title)
-            Spacer(minLength: 24)
-            Text(shortcut)
-                .font(.body.monospaced())
-                .foregroundStyle(.secondary)
+private extension View {
+    @ViewBuilder func menuShortcut(_ label: String) -> some View {
+        if let shortcut = MenuShortcutParser.shortcut(from: label) {
+            keyboardShortcut(shortcut)
+        } else {
+            self
         }
-        .frame(minWidth: 210)
     }
 }
 

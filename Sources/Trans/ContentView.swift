@@ -122,23 +122,28 @@ private struct SidebarView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("全局快捷键").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                shortcut("⌥ S", "划词翻译")
-                shortcut("⌥ D", "截图 OCR")
-                shortcut("⌥ A", "输入翻译")
-                shortcut("⌥ F", "静默 OCR")
-                shortcut("⌥ T", "输入框翻译")
+                shortcut("text.cursor", "⌥S", "划词翻译")
+                shortcut("viewfinder", "⌥D", "截图 OCR")
+                shortcut("text.bubble", "⌥A", "输入翻译")
+                shortcut("rectangle.dashed.badge.record", "⌥F", "静默 OCR")
+                shortcut("rectangle.and.pencil.and.ellipsis", "⌥T", "输入框翻译")
             }
             .padding(16)
         }
         .background(.thinMaterial)
     }
 
-    private func shortcut(_ key: String, _ title: String) -> some View {
-        HStack {
-            Text(title).font(.caption)
+    private func shortcut(_ icon: String, _ key: String, _ title: String) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 15)
+            Text(title).font(.caption).lineLimit(1)
             Spacer()
-            Text(key).font(.caption.monospaced()).foregroundStyle(.secondary)
+            ShortcutKeyLabel(shortcut: key)
         }
+        .frame(height: 24)
     }
 }
 
@@ -309,8 +314,16 @@ private struct OCRView: View {
     var body: some View {
         VStack(spacing: 0) {
             Header(title: "文字识别", subtitle: "截图、选图、剪贴板与连续 OCR") {
-                Button { Task { await model.chooseAndRecognize() } } label: { Label("选择图片", systemImage: "photo") }
-                Button { Task { await model.screenshotAndRecognize() } } label: { Label("截图识别", systemImage: "viewfinder") }
+                Button { Task { await model.chooseAndRecognize() } } label: {
+                    Label("选择图片", systemImage: "photo")
+                }
+                Button { Task { await model.screenshotAndRecognize() } } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "viewfinder")
+                        Text("截图识别")
+                        ShortcutKeyLabel(shortcut: model.settings.screenshotHotKey, emphasized: true)
+                    }
+                }
                     .buttonStyle(.borderedProminent)
             }
             Divider()
@@ -359,7 +372,11 @@ private struct OCRView: View {
                         }
                     }
                 } else {
-                    EmptyHint(icon: "photo.badge.plus", title: "放入图片", detail: "选择文件、截图，或从剪贴板读取")
+                    OCRCapturePlaceholder(
+                        shortcut: model.settings.screenshotHotKey,
+                        onCapture: { Task { await model.screenshotAndRecognize() } },
+                        onChoose: { Task { await model.chooseAndRecognize() } }
+                    )
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -455,6 +472,90 @@ private struct OCRView: View {
             set: { _ in model.toggleContinuousOCR() }
         ))
         .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+private struct ShortcutKeyLabel: View {
+    let shortcut: String
+    var emphasized = false
+
+    var body: some View {
+        Text(shortcut)
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .foregroundStyle(emphasized ? Color.white : Color.secondary)
+            .padding(.horizontal, 6)
+            .frame(height: 20)
+            .background(
+                emphasized ? Color.white.opacity(0.18) : Color(nsColor: .controlBackgroundColor),
+                in: RoundedRectangle(cornerRadius: 5)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(emphasized ? Color.white.opacity(0.28) : Color(nsColor: .separatorColor).opacity(0.8))
+            }
+            .accessibilityLabel("快捷键 \(shortcut)")
+    }
+}
+
+private struct OCRCapturePlaceholder: View {
+    let shortcut: String
+    let onCapture: () -> Void
+    let onChoose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(red: 0.09, green: 0.55, blue: 0.65).opacity(0.12))
+                Image(systemName: "viewfinder")
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(Color(red: 0.09, green: 0.55, blue: 0.65))
+            }
+            .frame(width: 58, height: 58)
+
+            VStack(spacing: 3) {
+                Text("截图识别").font(.headline)
+                Text("框选屏幕内容").font(.caption).foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                Button(action: onCapture) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "viewfinder")
+                        Text("截图")
+                        ShortcutKeyLabel(shortcut: shortcut, emphasized: true)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                Button(action: onChoose) {
+                    Image(systemName: "photo")
+                }
+                .buttonStyle(.bordered)
+                .help("选择图片")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(16)
+    }
+}
+
+private struct SettingsShortcutRow: View {
+    let icon: String
+    let title: String
+    let shortcut: String
+    var emphasized = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.callout)
+                .foregroundStyle(emphasized ? Color(red: 0.09, green: 0.55, blue: 0.65) : Color.secondary)
+                .frame(width: 20)
+            Text(title)
+            Spacer()
+            ShortcutKeyLabel(shortcut: shortcut)
+        }
+        .frame(minHeight: 26)
     }
 }
 
@@ -1054,11 +1155,11 @@ private struct SettingsView: View {
                     Toggle("记住窗口位置", isOn: $model.settings.rememberWindow)
                 }
                 Section("快捷键") {
-                    LabeledContent("划词翻译", value: model.settings.selectionHotKey)
-                    LabeledContent("截图 OCR", value: model.settings.screenshotHotKey)
-                    LabeledContent("输入翻译", value: model.settings.inputHotKey)
-                    LabeledContent("静默 OCR", value: model.settings.ocrHotKey)
-                    LabeledContent("输入框翻译", value: model.settings.inputBoxHotKey)
+                    SettingsShortcutRow(icon: "text.cursor", title: "划词翻译", shortcut: model.settings.selectionHotKey)
+                    SettingsShortcutRow(icon: "viewfinder", title: "截图 OCR", shortcut: model.settings.screenshotHotKey, emphasized: true)
+                    SettingsShortcutRow(icon: "text.bubble", title: "输入翻译", shortcut: model.settings.inputHotKey)
+                    SettingsShortcutRow(icon: "rectangle.dashed.badge.record", title: "静默 OCR", shortcut: model.settings.ocrHotKey)
+                    SettingsShortcutRow(icon: "rectangle.and.pencil.and.ellipsis", title: "输入框翻译", shortcut: model.settings.inputBoxHotKey)
                     Text("全局快捷键由系统热键注册；划词读取和输入框替换需要“辅助功能”权限。")
                         .font(.caption).foregroundStyle(.secondary)
                     if let warning = model.hotKeyWarning {

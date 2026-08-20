@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+enum SelectionPopupKind {
+    case translation
+    case ocr
+}
+
 @MainActor
 final class SelectionPopupState: ObservableObject {
     @Published var title = "划词翻译"
@@ -11,6 +16,7 @@ final class SelectionPopupState: ObservableObject {
     @Published var sourceLanguage: Language = .auto
     @Published var targetLanguage: Language = .zhHans
     @Published var isPinned = false
+    @Published var kind: SelectionPopupKind = .translation
 }
 
 /// Borderless panel that can take key status for in-popup interaction without
@@ -33,6 +39,10 @@ final class SelectionPopupController {
     private var editDebounceTask: Task<Void, Never>?
     private var lastMouse = CGPoint.zero
     private(set) var lastShownText: String?
+    /// The text this session was opened with; unlike lastShownText it is not
+    /// rewritten by in-popup edits, so it still matches the AX selection.
+    private(set) var sessionSelectionText: String?
+    private(set) var dismissedText: String?
     private(set) var sessionID = UUID()
 
     var isVisible: Bool { panel?.isVisible ?? false }
@@ -41,13 +51,17 @@ final class SelectionPopupController {
     func show(
         text: String,
         title: String = "划词翻译",
+        kind: SelectionPopupKind = .translation,
         source: Language,
         target: Language,
         at mouse: CGPoint
     ) -> UUID {
         editDebounceTask?.cancel()
+        removeDismissMonitors()
         sessionID = UUID()
+        dismissedText = nil
         state.title = title
+        state.kind = kind
         state.sourceText = text
         state.sourceLanguage = source
         state.targetLanguage = target
@@ -55,20 +69,30 @@ final class SelectionPopupController {
         state.message = nil
         state.isTranslating = true
         lastShownText = text
+        sessionSelectionText = text
         lastMouse = mouse
         presentAfterLayout()
         return sessionID
     }
 
-    func showMessage(_ message: String, title: String = "划词翻译", at mouse: CGPoint) {
+    func showMessage(
+        _ message: String,
+        title: String = "划词翻译",
+        kind: SelectionPopupKind = .translation,
+        at mouse: CGPoint
+    ) {
         editDebounceTask?.cancel()
+        removeDismissMonitors()
         sessionID = UUID()
+        dismissedText = nil
         state.title = title
+        state.kind = kind
         state.sourceText = ""
         state.outputs = []
         state.isTranslating = false
         state.message = message
         lastShownText = nil
+        sessionSelectionText = nil
         lastMouse = mouse
         presentAfterLayout()
     }
@@ -96,9 +120,13 @@ final class SelectionPopupController {
         if isVisible { presentAfterLayout() }
     }
 
-    func dismiss() {
+    /// `suppressingReshow` marks an explicit close (✕ button, Esc/⌘W, open in
+    /// main window): the still-selected source text must not auto-reopen the
+    /// popup on the next drag gesture.
+    func dismiss(suppressingReshow: Bool = false) {
         editDebounceTask?.cancel()
         sessionID = UUID()
+        dismissedText = suppressingReshow ? sessionSelectionText : nil
         removeDismissMonitors()
         panel?.orderOut(nil)
     }
@@ -150,10 +178,18 @@ final class SelectionPopupController {
             var size = hostingView.fittingSize
             size.width = Self.panelWidth
             size.height = min(max(size.height, 64), 460)
-            let screen = Self.screenFrame(containing: lastMouse)
-            let origin = PopupPlacement.origin(mouse: lastMouse, panelSize: size, screen: screen)
-            panel.setFrame(CGRect(origin: origin, size: size), display: true)
-            if !panel.isVisible { panel.orderFrontRegardless() }
+            if panel.isVisible {
+                // The user may have dragged the panel; resize in place instead
+                // of snapping back to the mouse-anchored position.
+                let screen = panel.screen?.visibleFrame ?? Self.screenFrame(containing: panel.frame.origin)
+                let origin = PopupPlacement.anchoredOrigin(currentFrame: panel.frame, newSize: size, screen: screen)
+                panel.setFrame(CGRect(origin: origin, size: size), display: true)
+            } else {
+                let screen = Self.screenFrame(containing: lastMouse)
+                let origin = PopupPlacement.origin(mouse: lastMouse, panelSize: size, screen: screen)
+                panel.setFrame(CGRect(origin: origin, size: size), display: true)
+                panel.orderFrontRegardless()
+            }
             installDismissMonitors()
         }
     }
@@ -168,9 +204,9 @@ final class SelectionPopupController {
             },
             onOpenMain: { [weak self] in
                 self?.onOpenInMainWindow?()
-                self?.dismiss()
+                self?.dismiss(suppressingReshow: true)
             },
-            onClose: { [weak self] in self?.dismiss() },
+            onClose: { [weak self] in self?.dismiss(suppressingReshow: true) },
             onTogglePin: { [weak self] in self?.togglePinned() },
             onRetry: { [weak self] in
                 guard let self else { return }
@@ -224,7 +260,7 @@ final class SelectionPopupController {
                     let command = event.modifierFlags.contains(.command)
                     switch (event.charactersIgnoringModifiers?.lowercased(), command, event.keyCode) {
                     case (_, _, 53), ("w", true, _):
-                        Task { @MainActor in self.dismiss() }
+                        Task { @MainActor in self.dismiss(suppressingReshow: true) }
                         return nil
                     case ("p", true, _):
                         self.togglePinned()
@@ -301,6 +337,14 @@ struct SelectionPopupView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(headerAccent.opacity(0.14))
+                Image(systemName: state.kind == .ocr ? "viewfinder" : "character.book.closed")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(headerAccent)
+            }
+            .frame(width: 24, height: 24)
             popupButton(
                 systemName: state.isPinned ? "pin.fill" : "pin",
                 help: state.isPinned ? "取消钉住（⌘P）" : "钉住窗口（⌘P）",
@@ -308,8 +352,7 @@ struct SelectionPopupView: View {
             )
             .foregroundStyle(state.isPinned ? Color.accentColor : Color.secondary)
             Text(state.title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .font(.subheadline.weight(.semibold))
             Spacer()
             popupButton(systemName: "arrow.clockwise", help: "重新翻译（⌘R）") {
                 onRetry()
@@ -319,6 +362,10 @@ struct SelectionPopupView: View {
             popupButton(systemName: "xmark", help: "关闭（⌘W / Esc）", action: onClose)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var headerAccent: Color {
+        state.kind == .ocr ? Color(red: 0.09, green: 0.55, blue: 0.65) : .accentColor
     }
 
     private func popupButton(
@@ -339,7 +386,9 @@ struct SelectionPopupView: View {
     private var sourceCard: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text("原文").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                Text(state.kind == .ocr ? "识别文本" : "原文")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button { onCopy(state.sourceText) } label: {
                     Image(systemName: "doc.on.doc").font(.caption2)
@@ -410,7 +459,9 @@ struct SelectionPopupView: View {
         } else if state.isTranslating {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
-                Text("翻译中…").font(.callout).foregroundStyle(.secondary)
+                Text(state.kind == .ocr ? "正在整理翻译结果…" : "翻译中…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
