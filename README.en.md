@@ -4,36 +4,40 @@
 
 <h1 align="center">Trans for macOS</h1>
 
-<p align="center"><strong>A lightweight macOS workspace for translation and OCR.</strong></p>
+<p align="center"><strong>A native macOS tool for translation and OCR.</strong></p>
 
 [简体中文](README.md) · English
 
-Trans brings text input, selected-text translation, screenshots, clipboard OCR, and image recognition into one native macOS workspace. It can call multiple cloud or local translation services in parallel, keeps history and non-sensitive settings locally, and stores service credentials in the macOS Keychain.
+Trans brings text input, selected text, screenshots, clipboard content, and image OCR into one macOS app. Choose cloud services, local models, or Apple's on-device capabilities, then use shortcuts or the URL scheme to invoke Trans from other apps.
 
 ## Features
 
-- Text, selected-text, screenshot, silent, clipboard, and in-place translation
-- Floating translation and OCR panels with editable source text and language switching
-- Apple on-device translation plus Google, Microsoft, Baidu, Youdao, Caiyun, Niu, LibreTranslate, DeepL, OpenAI-compatible services, and local Ollama models
-- Vision-based offline OCR, language detection, smart paragraphs, and QR-code recognition
+- Text, selected-text, silent selected-text, screenshot, clipboard OCR, and in-place translation
+- Floating OCR and translation panels with editable text, source/target language switching, and automatic retranslation after edits
+- Apple on-device translation, plus Google, Microsoft, Baidu, Youdao, Caiyun, Niu, LibreTranslate, DeepL, and OpenAI-compatible endpoints
+- Local Ollama models through Ollama's OpenAI-compatible Chat Completions API
+- Offline macOS Vision OCR, language detection, smart paragraphs, QR-code recognition, multi-image OCR, and stitched OCR
+- Text-to-speech, copy, and source/target language swapping
 - Translation history with search, favorites, restore, and JSON export
 - Menu bar access and global shortcuts: `⌥S`, `⌥D`, `⌥A`, `⌥F`, `⌥T`
-- Native Trans JavaScript plugin imports, configuration, enable/disable, and removal
-- Built-in Chinese conversion, text tools, and AI writing plugins
+- Native Trans JavaScript plugins with import, configuration, enable/disable, and removal
+- Built-in Chinese conversion, text tools, and AI writing plugins (disabled by default)
 
 ## Requirements
 
-- macOS 14+
-- Xcode 16+
-- Apple on-device translation language packs require macOS 15+
+- macOS 14 or later
+- Xcode 16 or later
+- Apple on-device translation requires macOS 15+; the system may ask to download a language pack on first use
 
-## Run and build
+## Quick start
+
+Run the development build:
 
 ```bash
 swift run Trans
 ```
 
-To build a signed local app bundle:
+Build a local app bundle:
 
 ```bash
 chmod +x scripts/build-app.sh
@@ -41,32 +45,13 @@ chmod +x scripts/build-app.sh
 open dist/Trans.app
 ```
 
-Run the test suite with:
+Selected-text translation requires Accessibility permission. Screenshot features require Screen Recording permission; macOS will prompt when needed.
 
-```bash
-swift test
-```
+## Configure services
 
-The first selected-text translation requires Accessibility permission. Screenshot capture requires Screen Recording permission.
-
-## URL scheme
-
-Trans supports URL scheme calls from PopClip, Raycast, AppleScript, and other tools:
-
-```bash
-open 'trans://translate?text=Hello%20world'
-open 'trans://screenshot'
-open 'trans://ocr'
-open 'trans://selection'
-```
-
-## Services and plugins
-
-Open the **Services** page to configure endpoints, models, and API keys. Credentials are stored in the macOS Keychain. The **Plugins** page accepts `.zip` archives or Trans plugin directories containing `manifest.json` and `main.js`. Third-party plugins can execute JavaScript and access the network, so only install trusted plugins.
+Open the **Services** page, expand a service card, and enter its endpoint, model, and API key. Multiple services can be enabled at the same time. Apple on-device translation needs no configuration; whether LibreTranslate needs a key depends on the instance, while cloud services generally require provider credentials. Credentials are managed by the macOS Keychain.
 
 ### Ollama local models
-
-Trans includes an **Ollama** preset and uses Ollama's OpenAI-compatible Chat Completions API. No cloud account or API key is required:
 
 1. Install and start [Ollama](https://ollama.com/), then download a model:
 
@@ -77,10 +62,44 @@ Trans includes an **Ollama** preset and uses Ollama's OpenAI-compatible Chat Com
 2. Enable **Ollama** on Trans's **Services** page.
 3. Use `http://127.0.0.1:11434/v1/chat/completions` as the endpoint, set the model to one installed locally (for example, `llama3.2`), and leave the API key empty.
 
-Requests use the local Ollama server by default. Any gateway exposing an OpenAI-compatible Chat Completions endpoint can be configured through the **OpenAI-compatible** service instead.
+Requests use the local Ollama server by default. For another gateway that exposes an OpenAI-compatible Chat Completions endpoint, use the **OpenAI-compatible** service instead.
 
-See [Examples/EchoPlugin](Examples/EchoPlugin) for the minimal Trans plugin format.
+## Plugins
 
-## Privacy
+The **Plugins** page accepts `.zip` archives or Trans plugin directories containing `manifest.json` and `main.js`. Plugins can be enabled or disabled independently; fields, secrets, and menu items declared in the manifest generate their configuration UI.
 
-Translation text is sent only to services you enable. History and non-sensitive settings stay on the local machine; service credentials are kept in the macOS Keychain.
+Native text-translation plugins can use the JavaScript context names `transInfo`, `transOptions`, `transEnv`, `transLog`, and `transHTTP`, together with local CommonJS modules. OCR and TTS plugin types can be recognized and imported, but remain disabled until those extension points are connected. Third-party plugins execute JavaScript and may access the network, so install only plugins from sources you trust.
+
+See [Examples/EchoPlugin](Examples/EchoPlugin) for a minimal plugin:
+
+```javascript
+function translate(request) {
+  return { text: request.text, detectedLanguage: request.from };
+}
+```
+
+`request` contains `text`, `from`, and `to`.
+
+## URL scheme
+
+PopClip, Raycast, AppleScript, and other tools can call Trans with:
+
+```bash
+open 'trans://translate?text=Hello%20world'
+open 'trans://screenshot'
+open 'trans://ocr'
+open 'trans://selection'
+```
+
+## Development and tests
+
+```bash
+swift test
+swift build -c release
+```
+
+Application code lives in `Sources/Trans/`, and tests live in `Tests/TransTests/`. Before submitting changes, run the test suite and `git diff --check`; generated `.build/` and `dist/` contents should not be committed.
+
+## License
+
+This project is released under the [MIT License](LICENSE).
