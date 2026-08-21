@@ -470,8 +470,8 @@ final class AppModel: ObservableObject {
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [.folder, .zip, UTType(filenameExtension: "zip")].compactMap { $0 }
-        panel.message = "选择 Trans .zip/.zip 文件，或包含 manifest.json 和 main.js 的插件目录"
+        panel.allowedContentTypes = [.folder, .zip]
+        panel.message = "选择 .zip 文件，或包含 manifest.json 和 main.js 的 Trans 插件目录"
         guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
         var imported = 0
         var failures: [String] = []

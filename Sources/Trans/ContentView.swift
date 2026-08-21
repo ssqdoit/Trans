@@ -1119,7 +1119,7 @@ private struct PluginsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Header(title: "插件", subtitle: "兼容 Trans 文本翻译插件，并提供可直接使用的内置工具") {
+            Header(title: "插件", subtitle: "使用 Trans 原生插件格式扩展翻译能力") {
                 Button(action: model.installPlugin) {
                     Label("导入插件", systemImage: "square.and.arrow.down")
                 }
@@ -1130,7 +1130,7 @@ private struct PluginsView: View {
                 EmptyHint(
                     icon: "puzzlepiece.extension",
                     title: "尚未安装插件",
-                    detail: "可导入 .zip、.zip，或选择包含 manifest.json 与 main.js 的目录"
+                    detail: "可导入 .zip，或选择包含 manifest.json 与 main.js 的 Trans 插件目录"
                 )
             } else {
                 ScrollView {
@@ -1223,7 +1223,7 @@ private struct PluginsView: View {
 
             if !plugin.wrappedValue.category.isSupported {
                 Label(
-                    "已导入，但 Trans 当前尚未接入 Trans \(plugin.wrappedValue.category.displayName) 插件",
+                    "已导入，但 Trans 当前尚未接入 \(plugin.wrappedValue.category.displayName) 插件",
                     systemImage: "exclamationmark.triangle"
                 )
                 .font(.caption)

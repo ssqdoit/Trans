@@ -11,13 +11,6 @@ final class PluginManager: @unchecked Sendable {
     init(root: URL? = nil) {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let target = root ?? base.appendingPathComponent("Trans/Plugins", isDirectory: true)
-        let legacy = base.appendingPathComponent("Trans/Plugins", isDirectory: true)
-        if root == nil,
-           !FileManager.default.fileExists(atPath: target.path),
-           FileManager.default.fileExists(atPath: legacy.path) {
-            try? FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? FileManager.default.copyItem(at: legacy, to: target)
-        }
         self.root = target
         try? FileManager.default.createDirectory(at: self.root, withIntermediateDirectories: true)
         installBuiltIns()
@@ -37,7 +30,7 @@ final class PluginManager: @unchecked Sendable {
             }
     }
 
-    /// Imports a native Trans plugin directory or a Trans `.zip`/`.zip` package.
+    /// Imports a native Trans plugin directory or a `.zip` package.
     func install(from source: URL, previous: [InstalledPlugin]) throws -> InstalledPlugin {
         let prepared = try preparePluginFolder(from: source)
         defer { if prepared.cleanup { try? FileManager.default.removeItem(at: prepared.url) } }
@@ -112,7 +105,7 @@ final class PluginManager: @unchecked Sendable {
         let started = Date()
         do {
             guard plugin.category == .translate else {
-                throw TransError.plugin("Trans 当前仅支持运行 Trans 文本翻译插件")
+                throw TransError.plugin("Trans 当前仅支持运行文本翻译插件")
             }
             let folder = URL(fileURLWithPath: plugin.path)
             guard let manifest = loadManifest(at: folder) else { throw TransError.plugin("无法读取插件清单") }
@@ -131,8 +124,8 @@ final class PluginManager: @unchecked Sendable {
                 throw TransError.plugin("插件未导出 translate 函数")
             }
 
-            let from = Self.transLanguageCode(source)
-            let to = Self.transLanguageCode(target)
+            let from = Self.languageCode(source)
+            let to = Self.languageCode(target)
             let detected = source == .auto
                 ? (NLLanguageRecognizer.dominantLanguage(for: text)?.rawValue ?? "en")
                 : from
@@ -211,7 +204,6 @@ final class PluginManager: @unchecked Sendable {
         context.setObject(values, forKeyedSubscript: "transOptions" as NSString)
         context.setObject([
             "appVersion": "1.0.0",
-            "transVersion": "1.20.0",
             "platform": "macOS",
             "isTrans": true
         ], forKeyedSubscript: "transEnv" as NSString)
@@ -297,18 +289,14 @@ final class PluginManager: @unchecked Sendable {
     }
 
     private func source(of folder: URL) -> PluginSource {
-        guard let data = try? Data(contentsOf: folder.appendingPathComponent("manifest.json")),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return .trans }
-        return object["category"] == nil ? .trans : .trans
+        .trans
     }
 
     private func loadManifest(at folder: URL) -> PluginManifest? {
-        for name in ["manifest.json", "manifest.json"] {
-            let url = folder.appendingPathComponent(name)
-            if let data = try? Data(contentsOf: url),
-               let manifest = try? JSONDecoder().decode(PluginManifest.self, from: data) {
-                return manifest
-            }
+        let url = folder.appendingPathComponent("manifest.json")
+        if let data = try? Data(contentsOf: url),
+           let manifest = try? JSONDecoder().decode(PluginManifest.self, from: data) {
+            return manifest
         }
         return nil
     }
@@ -334,8 +322,8 @@ final class PluginManager: @unchecked Sendable {
             throw TransError.plugin("找不到所选插件")
         }
         if isDirectory.boolValue { return (source, false) }
-        guard ["zip", "zip"].contains(source.pathExtension.lowercased()) else {
-            throw TransError.plugin("请选择 .zip、.zip 或插件目录")
+        guard source.pathExtension.lowercased() == "zip" else {
+            throw TransError.plugin("请选择 .zip 或插件目录")
         }
 
         let temporary = FileManager.default.temporaryDirectory
@@ -371,7 +359,7 @@ final class PluginManager: @unchecked Sendable {
         for case let url as URL in enumerator {
             let depth = url.pathComponents.count - source.pathComponents.count
             if depth > 4 { enumerator.skipDescendants(); continue }
-            if ["manifest.json", "manifest.json"].contains(url.lastPathComponent),
+            if url.lastPathComponent == "manifest.json",
                loadManifest(at: url.deletingLastPathComponent()) != nil {
                 candidates.append(url.deletingLastPathComponent())
             }
@@ -717,7 +705,7 @@ private extension PluginManager {
         return lines.joined(separator: "\n")
     }
 
-    static func transLanguageCode(_ language: Language) -> String {
+    static func languageCode(_ language: Language) -> String {
         switch language {
         case .zhHans: "zh-Hans"
         case .zhHant: "zh-Hant"
@@ -803,7 +791,7 @@ private struct BuiltInPlugin {
             script: #"""
             function supportLanguages() { return ["auto", "zh-Hans", "zh-Hant"]; }
             function translate(query, completion) {
-                completion({ result: { toParagraphs: [$trans.transform(query.text, transOptions.mode || "traditional")], from: query.detectFrom, to: query.to } });
+                completion({ text: $trans.transform(query.text, transOptions.mode || "traditional"), detectedLanguage: query.detectFrom });
             }
             """#
         ),
@@ -837,7 +825,7 @@ private struct BuiltInPlugin {
             script: #"""
             function supportLanguages() { return ["auto", "zh-Hans", "zh-Hant", "en"]; }
             function translate(query, completion) {
-                completion({ result: { toParagraphs: [$trans.transform(query.originalText || query.text, transOptions.mode || "clean")] } });
+                completion({ text: $trans.transform(query.originalText || query.text, transOptions.mode || "clean") });
             }
             """#
         ),

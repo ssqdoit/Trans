@@ -3,7 +3,6 @@ import Security
 
 final class CredentialStore {
     private let service = "com.trans.credentials"
-    private let legacyService = "com.trans.credentials"
 
     func value(for account: String) -> String? {
         let query: [String: Any] = [
@@ -18,18 +17,7 @@ final class CredentialStore {
            let data = item as? Data {
             return String(data: data, encoding: .utf8)
         }
-        let legacyQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: legacyService,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        guard SecItemCopyMatching(legacyQuery as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data,
-              let migrated = String(data: data, encoding: .utf8) else { return nil }
-        set(migrated, for: account)
-        return migrated
+        return nil
     }
 
     func set(_ value: String, for account: String) {

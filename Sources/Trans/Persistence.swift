@@ -13,12 +13,6 @@ final class PersistenceStore {
         decoder.dateDecodingStrategy = .iso8601
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let target = directory ?? base.appendingPathComponent("Trans", isDirectory: true)
-        let legacy = base.appendingPathComponent("Trans", isDirectory: true)
-        if directory == nil,
-           !FileManager.default.fileExists(atPath: target.path),
-           FileManager.default.fileExists(atPath: legacy.path) {
-            try? FileManager.default.copyItem(at: legacy, to: target)
-        }
         self.directory = target
         try? FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
     }

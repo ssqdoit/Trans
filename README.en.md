@@ -18,7 +18,7 @@ Trans brings text input, selected-text translation, screenshots, clipboard OCR, 
 - Vision-based offline OCR, language detection, smart paragraphs, and QR-code recognition
 - Translation history with search, favorites, restore, and JSON export
 - Menu bar access and global shortcuts: `⌥S`, `⌥D`, `⌥A`, `⌥F`, `⌥T`
-- Trans `.zip`/`.zip` imports and JavaScript translation plugins
+- Native Trans JavaScript plugin imports, configuration, enable/disable, and removal
 - Built-in Chinese conversion, text tools, and AI writing plugins
 
 ## Requirements
@@ -62,7 +62,7 @@ open 'trans://selection'
 
 ## Services and plugins
 
-Open the **Services** page to configure endpoints, models, and API keys. Credentials are stored in the macOS Keychain. The **Plugins** page accepts Trans plugin archives or directories containing `manifest.json` and `main.js`. Third-party plugins can execute JavaScript and access the network, so only install trusted plugins.
+Open the **Services** page to configure endpoints, models, and API keys. Credentials are stored in the macOS Keychain. The **Plugins** page accepts `.zip` archives or Trans plugin directories containing `manifest.json` and `main.js`. Third-party plugins can execute JavaScript and access the network, so only install trusted plugins.
 
 ### Ollama local models
 

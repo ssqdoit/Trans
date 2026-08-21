@@ -335,12 +335,10 @@ enum PluginCategory: String, Codable, CaseIterable {
 
 enum PluginSource: String, Codable {
     case trans
-    case trans
     case builtIn
 
     var displayName: String {
         switch self {
-        case .trans: "Trans 插件"
         case .trans: "Trans 插件"
         case .builtIn: "内置插件"
         }
@@ -404,13 +402,9 @@ struct PluginManifest: Codable {
     var version: String
     var author: String?
     var summary: String?
-    /// Compatibility alias for plugin manifests that use the Trans-style
-    /// `description` field. Internally manifests use `summary`.
-    var description: String? { summary }
     var main: String?
     var category: PluginCategory
     var homepage: String?
-    var minTransVersion: String?
     var options: [PluginOption]
 
     init(
@@ -422,7 +416,6 @@ struct PluginManifest: Codable {
         main: String? = nil,
         category: PluginCategory = .translate,
         homepage: String? = nil,
-        minTransVersion: String? = nil,
         options: [PluginOption] = []
     ) {
         self.identifier = identifier
@@ -433,17 +426,12 @@ struct PluginManifest: Codable {
         self.main = main
         self.category = category
         self.homepage = homepage
-        self.minTransVersion = minTransVersion
         self.options = options
     }
 
     private enum CodingKeys: String, CodingKey {
         case identifier, name, version, author, summary, main
-        case category, homepage, minTransVersion, options
-    }
-
-    private enum LegacyCodingKeys: String, CodingKey {
-        case description
+        case category, homepage, options
     }
 
     init(from decoder: Decoder) throws {
@@ -452,13 +440,10 @@ struct PluginManifest: Codable {
         name = try container.decode(String.self, forKey: .name)
         version = try container.decode(String.self, forKey: .version)
         author = try container.decodeIfPresent(String.self, forKey: .author)
-        let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
         summary = try container.decodeIfPresent(String.self, forKey: .summary)
-            ?? legacy.decodeIfPresent(String.self, forKey: .description)
         main = try container.decodeIfPresent(String.self, forKey: .main)
         category = try container.decodeIfPresent(PluginCategory.self, forKey: .category) ?? .translate
         homepage = try container.decodeIfPresent(String.self, forKey: .homepage)
-        minTransVersion = try container.decodeIfPresent(String.self, forKey: .minTransVersion)
         options = try container.decodeIfPresent([PluginOption].self, forKey: .options) ?? []
     }
 }

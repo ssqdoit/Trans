@@ -64,7 +64,7 @@ final class PluginManagerTests: XCTestCase {
             script: #"""
             function supportLanguages() { return ["auto", "en", "zh-Hans"]; }
             function translate(query, completion) {
-                completion({ result: { toParagraphs: [(transOptions.prefix || "") + query.text], from: query.detectFrom } });
+                completion({ text: (transOptions.prefix || "") + query.text, detectedLanguage: query.detectFrom });
             }
             """#
         )
@@ -87,7 +87,7 @@ final class PluginManagerTests: XCTestCase {
         XCTAssertEqual(output.detectedLanguage, "en")
     }
 
-    func testImportsTranspluginArchive() throws {
+    func testImportsTransPluginArchive() throws {
         let source = try makeTransPlugin(
             identifier: "com.example.trans.archive",
             script: "function translate(query, completion) { completion({result:{toParagraphs:[query.text]}}); }"
@@ -107,7 +107,7 @@ final class PluginManagerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: plugin.path + "/main.js"))
     }
 
-    func testRunsAsyncTransPluginAndBuiltInCryptoJSModule() async throws {
+    func testRunsAsyncTransPluginAndBuiltInCryptoModule() async throws {
         let source = try makeTransPlugin(
             identifier: "com.example.trans.async",
             script: #"""
@@ -165,8 +165,8 @@ final class PluginManagerTests: XCTestCase {
     ) throws -> URL {
         let folder = temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let info = #"{"identifier":"\#(identifier)","version":"1.0.0","category":"\#(category)","name":"测试 Trans 插件","summary":"回归测试"\#(infoExtras)}"#
-        try Data(info.utf8).write(to: folder.appendingPathComponent("manifest.json"))
+        let manifest = #"{"identifier":"\#(identifier)","version":"1.0.0","category":"\#(category)","name":"测试 Trans 插件","summary":"回归测试"\#(infoExtras)}"#
+        try Data(manifest.utf8).write(to: folder.appendingPathComponent("manifest.json"))
         try Data(script.utf8).write(to: folder.appendingPathComponent(mainName))
         return folder
     }

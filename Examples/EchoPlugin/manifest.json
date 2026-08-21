@@ -3,6 +3,6 @@
   "name": "示例翻译插件",
   "version": "1.0.0",
   "author": "Trans",
-  "description": "演示 Trans 插件的最小结构",
+  "summary": "演示 Trans 原生插件的最小结构",
   "main": "main.js"
 }
