@@ -908,6 +908,7 @@ private struct BuiltInServiceView: View {
 private func serviceBadge(_ kind: ServiceKind) -> String {
     switch kind {
     case .appleLocal: "内置"
+    case .ollama: "本地"
     case .google, .microsoft: "公共"
     case .libre: "可选"
     default: "密钥"
@@ -924,6 +925,7 @@ private func serviceSymbol(_ kind: ServiceKind) -> String {
     case .caiyun: "cloud.sun.fill"
     case .niu: "n.circle.fill"
     case .openAI: "sparkles"
+    case .ollama: "cube.transparent"
     case .qwen: "q.circle.fill"
     case .deepseek: "d.circle.fill"
     case .kimi: "k.circle.fill"
@@ -1074,7 +1076,9 @@ private struct ServiceEditor: View {
             Text(status).font(.caption).foregroundStyle(status.contains("成功") ? Color.green : Color.orange)
         }
     }
-    private var needsPrimaryCredential: Bool { service.kind != .google && service.kind != .appleLocal }
+    private var needsPrimaryCredential: Bool {
+        service.kind != .google && service.kind != .appleLocal && service.kind != .ollama
+    }
     private var needsSecondarySecret: Bool { service.kind == .baidu || service.kind == .youdao }
     private var credentialPlaceholder: String { service.kind == .microsoft ? "公共模式可留空" : "必填" }
     private var primaryCredentialLabel: String {
@@ -1096,6 +1100,7 @@ private struct ServiceEditor: View {
         case .caiyun: "cloud.sun.fill"
         case .niu: "n.circle.fill"
         case .openAI: "sparkles"
+        case .ollama: "cube.transparent"
         case .qwen: "q.circle.fill"
         case .deepseek: "d.circle.fill"
         case .kimi: "k.circle.fill"

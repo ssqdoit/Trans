@@ -8,7 +8,7 @@
 
 简体中文 · [English](README.en.md)
 
-Trans 是一款原生 macOS 翻译与 OCR 效率工具。它把输入、划词、截图、剪贴板和图片中的文字汇集到一个轻巧工作台，并可同时调用多个翻译服务，方便快速使用或对照结果。常用功能都有全局快捷键；OCR、历史和非敏感配置留在本机，服务密钥安全保存在 macOS 钥匙串。
+Trans 是一款原生 macOS 翻译与 OCR 工作台。它把输入、划词、截图、剪贴板和图片中的文字汇集到一个轻量应用中，可并发调用多个云端或本地翻译服务。常用功能支持全局快捷键；OCR、历史和非敏感配置留在本机，服务密钥安全保存在 macOS 钥匙串。
 
 ## Logo 设计
 
@@ -18,7 +18,7 @@ Trans 是一款原生 macOS 翻译与 OCR 效率工具。它把输入、划词�
 
 - 输入翻译、划词翻译、静默划词、截图翻译、输入框原位翻译，多翻译服务并发返回
 - 划词/OCR 浮动小窗：原文可编辑（停顿自动重翻）、源/目标语言即时切换
-- Apple 本地离线翻译、Google、Microsoft、百度、有道、彩云、小牛、LibreTranslate、DeepL、OpenAI 兼容接口
+- Apple 本地离线翻译、Google、Microsoft、百度、有道、彩云、小牛、LibreTranslate、DeepL、OpenAI 兼容接口和 Ollama 本地模型
 - 截图 OCR、静默截图 OCR（浮动小窗展示识别与翻译）、多图 OCR、剪贴板 OCR、连续拼接 OCR
 - macOS Vision 离线文字识别、语言检测、智能分段、二维码识别
 - 原文和译文语音朗读、复制、语言互换
@@ -28,7 +28,7 @@ Trans 是一款原生 macOS 翻译与 OCR 效率工具。它把输入、划词�
 - 内置“简繁与拼音”“文本格式工具”“AI 写作助手”插件（默认关闭，按需开启）
 - 本地设置与服务配置持久化
 
-## 运行
+## 安装与运行
 
 要求 macOS 14+ 和 Xcode 16+。
 
@@ -59,7 +59,22 @@ open 'trans://selection'
 
 ## 配置翻译服务
 
-打开“服务”，展开服务卡片并填写接口地址和 API Key。可以同时启用多个服务。Apple 本地翻译是系统内置服务，无需任何配置（macOS 15+，首次使用某个语言组合时系统会提示下载语言包）；LibreTranslate 是否需要密钥取决于你配置的实例；DeepL 和 OpenAI 兼容服务通常需要密钥。
+打开“服务”，展开服务卡片并填写接口地址、模型和 API Key。可以同时启用多个服务。Apple 本地翻译是系统内置服务，无需任何配置（macOS 15+，首次使用某个语言组合时系统会提示下载语言包）；LibreTranslate 是否需要密钥取决于你配置的实例；DeepL 和云端 OpenAI 兼容服务通常需要密钥。
+
+### Ollama 本地模型
+
+Trans 已内置 Ollama 服务预设，使用 Ollama 的 OpenAI 兼容 API，不需要额外的云端账号或 API Key：
+
+1. 安装并启动 [Ollama](https://ollama.com/)，下载一个模型，例如：
+
+   ```bash
+   ollama pull llama3.2
+   ```
+
+2. 在 Trans 的“服务”页面添加或启用 **Ollama**。
+3. 确认接口地址为 `http://127.0.0.1:11434/v1/chat/completions`，模型填写本机已下载的模型名称（例如 `llama3.2`），API Key 留空即可。
+
+Ollama 请求默认只发送到本机；如果你通过代理或网关暴露了兼容 OpenAI Chat Completions 的接口，也可以选择“OpenAI 兼容”服务并填写对应地址。
 
 ## 插件
 

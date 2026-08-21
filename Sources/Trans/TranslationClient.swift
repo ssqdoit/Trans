@@ -57,7 +57,7 @@ struct TranslationClient {
                 request = try libreRequest(url: url, text: text, source: source, target: target, service: service)
             case .deepL:
                 request = try deepLRequest(url: url, text: text, source: source, target: target, service: service)
-            case .openAI, .qwen, .deepseek, .kimi, .glm:
+            case .openAI, .ollama, .qwen, .deepseek, .kimi, .glm:
                 request = try openAIRequest(url: url, text: text, source: source, target: target, service: service)
             case .plugin:
                 throw TransError.service("插件服务需由插件运行器调用")
@@ -386,7 +386,7 @@ struct TranslationClient {
                   let first = translations.first,
                   let text = first["text"] as? String else { throw TransError.invalidResponse }
             return (text, first["detected_source_language"] as? String)
-        case .openAI, .qwen, .deepseek, .kimi, .glm:
+        case .openAI, .ollama, .qwen, .deepseek, .kimi, .glm:
             guard let json = object as? [String: Any] else { throw TransError.invalidResponse }
             guard let choices = json["choices"] as? [[String: Any]],
                   let message = choices.first?["message"] as? [String: Any],

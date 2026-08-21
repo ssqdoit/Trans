@@ -98,10 +98,19 @@ final class TranslationClientTests: XCTestCase {
 
     func testParsesOpenAICompatibleLLMResponses() throws {
         let data = #"{"choices":[{"message":{"role":"assistant","content":"你好"}}]}"#.data(using: .utf8)!
-        for kind in [ServiceKind.qwen, .deepseek, .kimi, .glm] {
+        for kind in [ServiceKind.ollama, .qwen, .deepseek, .kimi, .glm] {
             let result = try TranslationClient.parse(data: data, kind: kind)
             XCTAssertEqual(result.text, "你好")
         }
+    }
+
+    func testOllamaDefaultServicePreset() {
+        let service = TranslationServiceConfig.defaults.first { $0.kind == .ollama }
+        XCTAssertEqual(service?.endpoint, "http://127.0.0.1:11434/v1/chat/completions")
+        XCTAssertEqual(service?.model, "llama3.2")
+        XCTAssertEqual(service?.apiKey, "")
+        XCTAssertFalse(service?.enabled ?? true)
+        XCTAssertTrue(ServiceKind.ollama.usesOpenAIProtocol)
     }
 
     func testLLMDefaultServicePresets() {

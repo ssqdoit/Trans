@@ -113,6 +113,7 @@ enum ServiceKind: String, Codable, CaseIterable {
     case libre = "LibreTranslate"
     case deepL = "DeepL"
     case openAI = "OpenAI 兼容"
+    case ollama = "Ollama"
     case qwen = "通义千问"
     case deepseek = "DeepSeek"
     case kimi = "Kimi"
@@ -122,7 +123,7 @@ enum ServiceKind: String, Codable, CaseIterable {
     /// 使用 OpenAI Chat Completions 协议的大模型服务。
     var usesOpenAIProtocol: Bool {
         switch self {
-        case .openAI, .qwen, .deepseek, .kimi, .glm: true
+        case .openAI, .ollama, .qwen, .deepseek, .kimi, .glm: true
         default: false
         }
     }
@@ -130,6 +131,7 @@ enum ServiceKind: String, Codable, CaseIterable {
     var defaultModel: String {
         switch self {
         case .openAI: "gpt-4.1-mini"
+        case .ollama: "llama3.2"
         case .qwen: "qwen-plus"
         case .deepseek: "deepseek-chat"
         case .kimi: "kimi-latest"
@@ -229,6 +231,14 @@ struct TranslationServiceConfig: Identifiable, Codable, Hashable {
             endpoint: "https://api.openai.com/v1/chat/completions",
             apiKey: "",
             model: ServiceKind.openAI.defaultModel,
+            enabled: false
+        ),
+        .init(
+            name: "Ollama",
+            kind: .ollama,
+            endpoint: "http://127.0.0.1:11434/v1/chat/completions",
+            apiKey: "",
+            model: ServiceKind.ollama.defaultModel,
             enabled: false
         ),
         .init(

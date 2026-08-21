@@ -59,7 +59,7 @@ final class AppModel: ObservableObject {
         self.navigation = navigation
         history = persistence.load([HistoryItem].self, from: "history.json", fallback: [])
         var loadedServices = persistence.load([TranslationServiceConfig].self, from: "services.json", fallback: TranslationServiceConfig.defaults)
-        let migratableKinds: Set<ServiceKind> = [.appleLocal, .google, .microsoft, .baidu, .youdao, .caiyun, .niu, .qwen, .deepseek, .kimi, .glm]
+        let migratableKinds: Set<ServiceKind> = [.appleLocal, .google, .microsoft, .baidu, .youdao, .caiyun, .niu, .ollama, .qwen, .deepseek, .kimi, .glm]
         for defaultService in TranslationServiceConfig.defaults where migratableKinds.contains(defaultService.kind) {
             if !loadedServices.contains(where: { $0.kind == defaultService.kind }) {
                 loadedServices.append(defaultService)
