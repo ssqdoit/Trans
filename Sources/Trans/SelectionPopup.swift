@@ -310,6 +310,8 @@ final class SelectionPopupController {
 }
 
 struct SelectionPopupView: View {
+    private static let iconButtonHitSize: CGFloat = 28
+
     @ObservedObject var state: SelectionPopupState
     var onCopy: (String) -> Void
     var onOpenMain: () -> Void
@@ -391,10 +393,13 @@ struct SelectionPopupView: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.caption.weight(.medium))
-                .frame(width: 22, height: 22)
+                .frame(
+                    width: Self.iconButtonHitSize,
+                    height: Self.iconButtonHitSize
+                )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .contentShape(Rectangle())
         .help(help)
     }
 
@@ -406,7 +411,13 @@ struct SelectionPopupView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button { onCopy(state.sourceText) } label: {
-                    Image(systemName: "doc.on.doc").font(.caption2)
+                    Image(systemName: "doc.on.doc")
+                        .font(.caption2)
+                        .frame(
+                            width: Self.iconButtonHitSize,
+                            height: Self.iconButtonHitSize
+                        )
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
@@ -445,8 +456,18 @@ struct SelectionPopupView: View {
                 ForEach(Language.allCases) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
             }
             .labelsHidden().controlSize(.small).frame(width: 126)
-            Button(action: onSwap) { Image(systemName: "arrow.left.arrow.right") }
-                .buttonStyle(.plain).controlSize(.small).foregroundStyle(.secondary).help("交换语言")
+            Button(action: onSwap) {
+                Image(systemName: "arrow.left.arrow.right")
+                    .frame(
+                        width: Self.iconButtonHitSize,
+                        height: Self.iconButtonHitSize
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .controlSize(.small)
+            .foregroundStyle(.secondary)
+            .help("交换语言")
             Picker("目标语言", selection: $state.targetLanguage) {
                 ForEach(Language.allCases.filter { $0 != .auto }) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
             }
@@ -502,7 +523,13 @@ struct SelectionPopupView: View {
                 Spacer()
                 if output.error == nil {
                     Button { onCopy(output.text) } label: {
-                        Image(systemName: "doc.on.doc").font(.caption)
+                        Image(systemName: "doc.on.doc")
+                            .font(.caption)
+                            .frame(
+                                width: Self.iconButtonHitSize,
+                                height: Self.iconButtonHitSize
+                            )
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless).help("复制")
                 }
