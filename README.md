@@ -26,10 +26,14 @@ Trans 将文本输入、划词、截图、剪贴板和图片 OCR 汇集到一个
 ## 系统要求
 
 - macOS 14 或更高版本
-- Xcode 16 或更高版本
+- 从源码构建需要 Xcode 26 或更高版本（Swift 6.2+）
 - Apple 本地翻译需要 macOS 15+；首次使用某个语言组合时，系统可能提示下载语言包
 
 ## 快速开始
+
+在 [Releases](https://github.com/ssqdoit/Trans/releases/latest) 下载 `Trans-v*-macOS-universal.zip`，解压后将 `Trans.app` 拖入“应用程序”。通用包同时支持 Apple Silicon 和 Intel Mac，无需安装 Xcode。
+
+发布包使用 ad-hoc 签名，尚未经过 Apple 公证。首次打开如被系统拦截，确认下载来源后，可在“系统设置 → 隐私与安全性”中允许打开。
 
 直接运行开发版：
 
@@ -99,6 +103,18 @@ swift build -c release
 ```
 
 应用代码位于 `Sources/Trans/`，测试位于 `Tests/TransTests/`。提交前请运行测试并检查 `git diff --check`；生成的 `.build/` 和 `dist/` 不应提交。
+
+### 发布应用
+
+推送 `v主版本.次版本.补丁版本` 格式的标签（例如 `v0.1.2`）后，GitHub Actions 会运行测试、构建通用 APP，并将 ZIP 包和 SHA-256 校验文件上传到对应 Release。普通代码推送不会发布应用。
+
+如需重新打包已有版本，可在 Actions 的 **Release macOS app** 工作流中选择 **Run workflow**，填写已有标签。标签对应的代码需要包含此发布配置和更新后的打包脚本。
+
+本地构建通用 APP：
+
+```bash
+TRANS_VERSION=0.1.2 ./scripts/build-app.sh --arch arm64 --arch x86_64
+```
 
 ## 开源协议
 

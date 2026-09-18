@@ -26,10 +26,14 @@ Trans brings text input, selected text, screenshots, clipboard content, and imag
 ## Requirements
 
 - macOS 14 or later
-- Xcode 16 or later
+- Building from source requires Xcode 26 or later (Swift 6.2+)
 - Apple on-device translation requires macOS 15+; the system may ask to download a language pack on first use
 
 ## Quick start
+
+Download `Trans-v*-macOS-universal.zip` from [Releases](https://github.com/ssqdoit/Trans/releases/latest), unzip it, and move `Trans.app` to Applications. The universal app supports Apple Silicon and Intel Macs without installing Xcode.
+
+Release builds are ad-hoc signed and not notarized by Apple. If macOS blocks the first launch, verify the download source and allow it in System Settings → Privacy & Security.
 
 Run the development build:
 
@@ -99,6 +103,18 @@ swift build -c release
 ```
 
 Application code lives in `Sources/Trans/`, and tests live in `Tests/TransTests/`. Before submitting changes, run the test suite and `git diff --check`; generated `.build/` and `dist/` contents should not be committed.
+
+### Release the app
+
+Pushing a tag in the `vMAJOR.MINOR.PATCH` format (for example, `v0.1.2`) runs GitHub Actions tests, builds the universal app, and uploads its ZIP and SHA-256 checksum file to the matching Release. Ordinary code pushes do not publish the app.
+
+To rebuild an existing version, choose **Run workflow** in the **Release macOS app** workflow and enter its tag. The tagged code must include this release configuration and the updated build script.
+
+Build a universal app locally:
+
+```bash
+TRANS_VERSION=0.1.2 ./scripts/build-app.sh --arch arm64 --arch x86_64
+```
 
 ## License
 

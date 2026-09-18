@@ -1,0 +1,100 @@
+name: Release macOS app
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build (for example, v0.1.2)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Validate version tag
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected a version tag such as v0.1.2, got: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          echo "TRANS_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+          echo "TRANS_BUILD_NUMBER=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Run tests
+        run: swift test
+
+      - name: Build universal app
+        run: ./scripts/build-app.sh --arch arm64 --arch x86_64
+
+      - name: Verify and archive app
+        shell: bash
+        run: |
+          codesign --verify --deep --strict --verbose=2 dist/Trans.app
+          lipo dist/Trans.app/Contents/MacOS/Trans -verify_arch arm64 x86_64
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' dist/Trans.app/Contents/Info.plist)" = "$TRANS_VERSION"
+          test -f dist/Trans.app/Contents/Resources/en.lproj/Localizable.strings
+          test -f dist/Trans.app/Contents/Resources/zh-Hans.lproj/Localizable.strings
+          ditto -c -k --sequesterRsrc --keepParent dist/Trans.app "dist/Trans-${RELEASE_TAG}-macOS-universal.zip"
+          cd dist
+          shasum -a 256 "Trans-${RELEASE_TAG}-macOS-universal.zip" > SHA256SUMS.txt
+
+      - name: Retain build artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Trans-${{ env.RELEASE_TAG }}-macOS-universal
+          path: |
+            dist/Trans-*-macOS-universal.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Publish release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          archive="dist/Trans-${RELEASE_TAG}-macOS-universal.zip"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$archive" dist/SHA256SUMS.txt --clobber
+          else
+            cat > "$RUNNER_TEMP/trans-release-notes.md" <<'EOF'
+          下载 `Trans-v*-macOS-universal.zip`，解压后将 `Trans.app` 拖入“应用程序”。
+          支持 Apple Silicon 和 Intel Mac，要求 macOS 14+。Apple 本地翻译需要 macOS 15+。
+
+          当前应用使用 ad-hoc 签名，未经过 Apple 公证，首次打开可能被 Gatekeeper 拦截。确认来源可信后，可在“系统设置 → 隐私与安全性”中允许打开。
+
+          Download the universal ZIP, unzip it, and move `Trans.app` to Applications.
+          Supports Apple Silicon and Intel Macs running macOS 14+. Apple on-device translation requires macOS 15+.
+          This build is ad-hoc signed and not notarized by Apple. If Gatekeeper blocks it, allow it in System Settings → Privacy & Security after verifying its source.
+          EOF
+            gh release create "$RELEASE_TAG" "$archive" dist/SHA256SUMS.txt \
+              --verify-tag --draft --title "Trans $RELEASE_TAG" \
+              --notes-file "$RUNNER_TEMP/trans-release-notes.md"
+          fi
+          gh release edit "$RELEASE_TAG" --draft=false
